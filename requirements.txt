@@ -1,0 +1,13 @@
+fastapi
+httpx
+pandas
+numpy
+scipy
+pandasql
+pyyaml
+requests
+sqlalchemy
+pyinstaller
+uvicorn
+defog
+pyarrow
