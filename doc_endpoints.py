@@ -25,12 +25,9 @@ logging.basicConfig(level=logging.INFO)
 
 from connection_manager import ConnectionManager
 from db_utils import (
-    add_to_recently_viewed_docs,
     add_tool,
     delete_tool,
-    get_all_docs,
     get_analysis_versions,
-    get_doc_data,
     get_report_data,
     get_tool_run,
     get_toolboxes,
@@ -38,14 +35,12 @@ from db_utils import (
     store_feedback,
     store_tool_run,
     toggle_disable_tool,
-    update_doc_data,
     update_report_data,
     update_table_chart_data,
     get_table_data,
     get_all_analyses,
     update_tool,
     update_tool_run_data,
-    delete_doc,
     get_all_tools,
 )
 
@@ -67,142 +62,6 @@ report_assets_dir = home_dir / "defog_report_assets"
 report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
 
 
-@router.websocket("/docs")
-async def doc_websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_json()
-            if "ping" in data:
-                # don't do anything
-                continue
-            if data.get("doc_uint8") is None:
-                logging.info("No document data provided.")
-                logging.info(data)
-                # send error back
-                await manager.send_personal_message(
-                    {"success": False, "error_message": "No document data provided."},
-                    websocket,
-                )
-                continue
-
-            if data.get("doc_id") is None:
-                await manager.send_personal_message(
-                    {"success": False, "error_message": "No document id provided."},
-                    websocket,
-                )
-                logging.info("Doc id is none ")
-                logging.info(data)
-
-                continue
-
-            col_name = "doc_blocks" if data.get("doc_blocks") else "doc_uint8"
-            err = await update_doc_data(
-                data.get("doc_id"),
-                [col_name, "doc_title"],
-                {col_name: data.get(col_name), "doc_title": data.get("doc_title")},
-            )
-
-            logging.info(data.get("api_key"))
-            logging.info(data.get("token"))
-            logging.info(data.get("doc_id"))
-
-            await manager.send_personal_message(data, websocket)
-    except WebSocketDisconnect as e:
-        # logging.info("Disconnected. Error: " +  str(e))
-        # traceback.print_exc()
-        manager.disconnect(websocket)
-        await websocket.close()
-    except Exception as e:
-        # logging.info("Disconnected. Error: " +  str(e))
-        # traceback.print_exc()
-        # other reasons for disconnect, like websocket being closed or a timeout
-        manager.disconnect(websocket)
-        await websocket.close()
-
-
-@router.post("/add_to_recently_viewed_docs")
-async def add_to_recently_viewed_docs_endpoint(request: Request):
-    """
-    Add a document to the recently viewed docs of a user.
-    """
-    try:
-        data = await request.json()
-        token = data.get("token")
-        key_name = data.get("key_name")
-        api_key = get_api_key_from_key_name(key_name)
-
-        doc_id = data.get("doc_id")
-
-        if token is None or type(token) != str:
-            return {"success": False, "error_message": "Invalid token."}
-
-        if doc_id is None or type(doc_id) != str:
-            return {"success": False, "error_message": "Invalid document id."}
-
-        err = await add_to_recently_viewed_docs(
-            token=token,
-            doc_id=doc_id,
-            api_key=api_key,
-            timestamp=str(datetime.datetime.now()),
-        )
-
-        if err:
-            raise Exception(err)
-
-        return {"success": True}
-    except Exception as e:
-        logging.info("Error getting analyses: " + str(e))
-        traceback.print_exc()
-        return {"success": False, "error_message": e}
-
-
-@router.post("/toggle_archive_status")
-async def toggle_archive_status(request: Request):
-    """
-    Toggle the archive status of a document.
-    """
-    data = await request.json()
-    doc_id = data.get("doc_id")
-    archive_status = data.get("archive_status")
-
-    err = await update_doc_data(doc_id, ["archived"], {"archived": archive_status})
-
-    if err:
-        return {"success": False, "error_message": err}
-
-    return {"success": True}
-
-
-@router.post("/get_doc")
-async def get_document(request: Request):
-    """
-    Get the document using the id passed.
-    If it doesn't exist, create one and return empty data.
-    """
-    data = await request.json()
-    key_name = data.get("key_name")
-    doc_id = data.get("doc_id")
-    token = data.get("token")
-    col_name = data.get("col_name") or "doc_blocks"
-    api_key = get_api_key_from_key_name(key_name)
-
-    if api_key is None or type(api_key) != str:
-        return {"success": False, "error_message": "Invalid api key."}
-
-    if doc_id is None or type(doc_id) != str:
-        return {"success": False, "error_message": "Invalid document id."}
-
-    err, doc_data = await get_doc_data(
-        api_key=api_key, doc_id=doc_id, token=token, col_name=col_name
-    )
-
-    if err:
-        return {"success": False, "error_message": err}
-
-    return {"success": True, "doc_data": doc_data}
-
-
 @router.post("/get_toolboxes")
 async def get_toolboxes_endpoint(request: Request):
     """
@@ -220,33 +79,6 @@ async def get_toolboxes_endpoint(request: Request):
             return {"success": False, "error_message": err}
 
         return {"success": True, "toolboxes": toolboxes}
-    except Exception as e:
-        logging.info("Error getting analyses: " + str(e))
-        traceback.print_exc()
-        return {"success": False, "error_message": "Unable to parse your request."}
-
-
-@router.post("/get_docs")
-async def get_docs(request: Request):
-    """
-    Get all documents of a user using the api key.
-    """
-    try:
-        data = await request.json()
-        token = data.get("token")
-
-        if token is None or type(token) != str:
-            return {"success": False, "error_message": "Invalid token."}
-
-        err, own_docs, recently_viewed_docs = await get_all_docs(token)
-        if err:
-            return {"success": False, "error_message": err}
-
-        return {
-            "success": True,
-            "docs": own_docs,
-            "recently_viewed_docs": recently_viewed_docs,
-        }
     except Exception as e:
         logging.info("Error getting analyses: " + str(e))
         traceback.print_exc()
@@ -697,30 +529,6 @@ async def create_new_step(request: Request):
     return
 
 
-@router.post("/delete_doc")
-async def delete_doc_endpoint(request: Request):
-    """
-    Delete a document using the id passed.
-    """
-    try:
-        data = await request.json()
-        doc_id = data.get("doc_id")
-
-        if doc_id is None or type(doc_id) != str:
-            return {"success": False, "error_message": "Invalid document id."}
-
-        err = await delete_doc(doc_id)
-
-        if err:
-            return {"success": False, "error_message": err}
-
-        return {"success": True}
-    except Exception as e:
-        logging.info("Error deleting doc: " + str(e))
-        traceback.print_exc()
-        return {"success": False, "error_message": str(e)[:300]}
-
-
 # download csv using tool_run_id and output_storage_key
 @router.post("/download_csv")
 async def download_csv(request: Request):
@@ -1073,35 +881,6 @@ async def get_analysis_versions_endpoint(request: Request):
         return {
             "success": False,
             "error_message": "Unable to get versions: " + str(e[:300]),
-        }
-
-
-@router.post("/update_dashboard_data")
-async def update_dashboard_data_endpoint(request: Request):
-    try:
-        data = await request.json()
-        if data.get("doc_uint8") is None:
-            return {"success": False, "error_message": "No document data provided."}
-
-        if data.get("doc_id") is None:
-            return {"success": False, "error_message": "No document id provided."}
-
-        col_name = "doc_blocks" if data.get("doc_blocks") else "doc_uint8"
-        err = await update_doc_data(
-            data.get("doc_id"),
-            [col_name, "doc_title"],
-            {col_name: data.get(col_name), "doc_title": data.get("doc_title")},
-        )
-        if err:
-            return {"success": False, "error_message": err}
-
-        return {"success": True}
-    except Exception as e:
-        logging.info("Error adding analysis to dashboard: " + str(e))
-        traceback.print_exc()
-        return {
-            "success": False,
-            "error_message": "Unable to add analysis to dashboard: " + str(e)[:300],
         }
 
 
