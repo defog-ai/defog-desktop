@@ -1,9 +1,9 @@
-# Agents GCP
+# Defog Desktop
 
-This directory contains the source code for the agents deployment.
+Defog is a privacy friendly AI data analyst that lets you ask data questions in plain English, while ensuring that your actual data never leaves your servers.
 
-## Building
+## Getting Started
 
-Note that we explicitly took out `defog` from requirements.txt because we wanted to track that separately from the rest of the docker commands and speed up the build process. You would need to run `pip install defog` if you're building this server locally, or want to pin the version of defog that you're using.
-
-This also means that if you do update defog-python, you would need to update `dockerfile.agents-python-server` to run pip install on the right version after uploading the new package to PyPi. This is to ensure that the built container has the right (and latest) version of defog-python in it.
+1. If you have not yet gotten a Defog API Key, sign up at https://defog.ai/signup to get a free API key! The free key lets you query up to 5 tables with 25 total columns, and up to 1000 queries per month.
+2. Update `config.env` with your API Key
+3. Launch defog with `python main.py`. This will automatically open up http://localhost:33364/static/extract-metadata.html in your browser.
