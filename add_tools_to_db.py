@@ -1,6 +1,10 @@
+from dotenv import load_dotenv
+import os
+
+load_dotenv("config.env")
+
 from agents.planner_executor.tool_helpers.all_tools import tools
 from db_utils import add_tool
-import os
 import asyncio
 
 

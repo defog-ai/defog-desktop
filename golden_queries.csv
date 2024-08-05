@@ -1,0 +1,159 @@
+question,sql,user_validated,valid_db
+Can you find the date when the fund symbol 'ABC' had the highest volume of trades in the year 2021?,"SELECT etf_prices.price_date
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'ABC' AND EXTRACT(YEAR FROM etf_prices.price_date::date) = 2021
+ORDER BY etf_prices.volume DESC
+LIMIT 1",False,
+Can you find the date when the fund symbol 'FUND SYMBOL' had the highest volume of trades in the year YEAR?,"SELECT etf_prices.price_date
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND EXTRACT(YEAR FROM etf_prices.price_date::date) = YEAR
+ORDER BY etf_prices.volume DESC
+LIMIT 1
+```",False,
+Can you find the date when the fund symbol 'FUND SYMBOL' had the lowest price in the year YEAR?,"SELECT etf_prices.price_date
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND EXTRACT(YEAR FROM etf_prices.price_date::date) = YEAR
+ORDER BY etf_prices.low ASC
+LIMIT 1
+```",False,
+Can you find the date when the fund symbol 'XYZ' had the lowest price in the year 2021?,"SELECT etf_prices.price_date
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'XYZ' AND EXTRACT(YEAR FROM etf_prices.price_date::date) = 2021
+ORDER BY etf_prices.low ASC
+LIMIT 1",False,
+Can you provide a list of all fund symbols that had a closing price below $50 on '2021-05-01'?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.price_date = '2021-05-01' AND etf_prices.close < 50",False,
+Can you provide a list of all fund symbols that had a closing price below a certain amount on a specific date?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.price_date = 'SPECIFIC DATE' AND etf_prices.close < AMOUNT
+```",False,
+Can you provide a list of all fund symbols that had a lowest price below $10 on '2021-04-01'?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.price_date = '2021-04-01' AND etf_prices.low < 10",False,
+Can you provide a list of all fund symbols that had a lowest price below a certain amount on a specific date?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.price_date = 'DATE' AND etf_prices.low < AMOUNT
+```",False,
+Can you provide a list of all fund symbols that had an adjusted closing price above $200 on '2021-02-01'?,"SELECT etf_prices.fund_symbol 
+FROM etf_prices 
+WHERE etf_prices.adj_close > 200 AND etf_prices.price_date = '2021-02-01'",False,
+Can you provide a list of all fund symbols that had an adjusted closing price above $60 on '2021-06-01'?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.adj_close > 60 AND etf_prices.price_date = '2021-06-01'",False,
+Can you provide a list of all fund symbols that had an adjusted closing price above a certain value on a specific date?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.adj_close > VALUE AND etf_prices.price_date = 'DATE'
+```",False,
+Can you provide a list of all fund symbols that had an adjusted closing price above a certain value on a specific date?,"SELECT etf_prices.fund_symbol 
+FROM etf_prices 
+WHERE etf_prices.adj_close > VALUE AND etf_prices.price_date = 'DATE'
+```",False,
+Can you provide a list of all fund symbols that had an opening price above $100 on '2021-08-01'?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.open > 100 AND etf_prices.price_date = '2021-08-01'",False,
+Can you provide a list of all fund symbols that had an opening price above $50 on '2021-01-01'?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.open > 50 AND etf_prices.price_date = '2021-01-01'",False,
+Can you provide a list of all fund symbols that had an opening price above a certain amount on a specific date?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.open > 'AMOUNT' AND etf_prices.price_date = 'DATE'
+```",False,
+Can you provide a list of all fund symbols that had an opening price above a certain amount on a specific date?,"SELECT etf_prices.fund_symbol
+FROM etf_prices
+WHERE etf_prices.open > 'AMOUNT' AND etf_prices.price_date = 'DATE'
+```",False,
+Can you provide the dates when the closing price for the fund symbol 'FUND SYMBOL' was lower than the opening price?,"SELECT etf_prices.price_date
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND etf_prices.close < etf_prices.open
+```",False,
+Can you provide the dates when the closing price for the fund symbol 'XYZ' was lower than the opening price?,"SELECT etf_prices.price_date
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'XYZ' AND etf_prices.close < etf_prices.open",False,
+Can you provide the dates when the volume of trades for the fund symbol 'ABC' was above 10000?,"SELECT etf_prices.price_date 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'ABC' 
+AND CAST(etf_prices.volume AS INTEGER) > 10000",False,
+Can you provide the dates when the volume of trades for the fund symbol 'FUND SYMBOL' was above a certain number?,"SELECT etf_prices.price_date 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' 
+AND CAST(etf_prices.volume AS INTEGER) > NUMBER
+```",False,
+What was the adjusted closing price for the fund symbol 'ABC' on the date '2021-03-01'?,"SELECT etf_prices.adj_close 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'ABC' 
+AND etf_prices.price_date = '2021-03-01'",False,
+What was the adjusted closing price for the fund symbol 'ABC' on the date '2021-06-01'?,"SELECT etf_prices.adj_close
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'ABC' AND etf_prices.price_date = '2021-06-01'",False,
+What was the adjusted closing price for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT etf_prices.adj_close
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND etf_prices.price_date = 'DATE'
+```",False,
+What was the adjusted closing price for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT etf_prices.adj_close 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' 
+AND etf_prices.price_date = 'DATE'
+```",False,
+What was the average closing price for the fund symbol 'FUND SYMBOL' in the month of 'SPECIFIC MONTH AND YEAR'?,"SELECT AVG(etf_prices.close) 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' 
+AND DATE(etf_prices.price_date) >= DATE('START DATE OF SPECIFIC MONTH AND YEAR') 
+AND DATE(etf_prices.price_date) <= DATE('END DATE OF SPECIFIC MONTH AND YEAR')
+```",False,
+What was the average closing price for the fund symbol 'XYZ' in the month of 'January 2021'?,"SELECT AVG(etf_prices.close) 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'XYZ' 
+AND DATE(etf_prices.price_date) >= DATE('2021-01-01') 
+AND DATE(etf_prices.price_date) <= DATE('2021-01-31')",False,
+What was the difference between the highest and lowest price for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT (etf_prices.high - etf_prices.low) AS price_difference
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND etf_prices.price_date = 'DATE'
+```",False,
+What was the difference between the highest and lowest price for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT (etf_prices.high - etf_prices.low) AS price_difference
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND etf_prices.price_date = 'DATE'
+```",False,
+What was the difference between the highest and lowest price for the fund symbol 'XYZ' on the date '2021-04-01'?,"SELECT (etf_prices.high - etf_prices.low) AS price_difference
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'XYZ' AND etf_prices.price_date = '2021-04-01'",False,
+What was the difference between the highest and lowest price for the fund symbol 'XYZ' on the date '2021-05-01'?,"SELECT (etf_prices.high - etf_prices.low) AS price_difference
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'XYZ' AND etf_prices.price_date = '2021-05-01'",False,
+What was the difference between the opening and closing price for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT etf_prices.open - etf_prices.close AS price_difference
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND etf_prices.price_date = 'DATE'
+```",False,
+What was the difference between the opening and closing price for the fund symbol 'XYZ' on the date '2021-03-01'?,"SELECT etf_prices.open - etf_prices.close AS price_difference
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'XYZ' AND etf_prices.price_date = '2021-03-01'",False,
+What was the highest price for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT etf_prices.high
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND etf_prices.price_date = 'DATE'
+```",False,
+What was the highest price for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT MAX(etf_prices.high) 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND etf_prices.price_date = 'DATE'
+```",False,
+What was the highest price for the fund symbol 'XYZ' on the date '2020-12-31'?,"SELECT MAX(etf_prices.high) 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'XYZ' AND etf_prices.price_date = '2020-12-31'",False,
+What was the highest price for the fund symbol 'XYZ' on the date '2021-09-01'?,"SELECT etf_prices.high
+FROM etf_prices
+WHERE etf_prices.fund_symbol = 'XYZ' AND etf_prices.price_date = '2021-09-01'",False,
+What was the volume of trades for the fund symbol 'ABC' on the date '2021-02-01'?,"SELECT etf_prices.volume 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'ABC' 
+AND etf_prices.price_date = '2021-02-01'",False,
+What was the volume of trades for the fund symbol 'ABC' on the date '2021-07-01'?,"SELECT etf_prices.volume 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'ABC' AND etf_prices.price_date = '2021-07-01'",False,
+What was the volume of trades for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT etf_prices.volume 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' AND etf_prices.price_date = 'DATE'
+```",False,
+What was the volume of trades for the fund symbol 'FUND SYMBOL' on the date 'DATE'?,"SELECT etf_prices.volume 
+FROM etf_prices 
+WHERE etf_prices.fund_symbol = 'FUND SYMBOL' 
+AND etf_prices.price_date = 'DATE'
+```",False,
