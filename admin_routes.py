@@ -14,7 +14,7 @@ import asyncio
 
 router = APIRouter()
 
-SALT = "TOMMARVOLORIDDLE"
+SALT = "WITHPEPPER"
 INTERNAL_API_KEY = "DUMMY_KEY"
 
 

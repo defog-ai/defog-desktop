@@ -5,7 +5,7 @@ from sqlalchemy import (
     update,
 )
 
-SALT = "TOMMARVOLORIDDLE"
+SALT = "WITHPEPPER"
 
 
 def login_user(username, password):

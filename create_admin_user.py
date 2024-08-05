@@ -5,7 +5,7 @@ from sqlalchemy import select, insert
 import hashlib
 import time
 
-SALT = "TOMMARVOLORIDDLE"
+SALT = "WITHPEPPER"
 INTERNAL_API_KEY = "dummy_api_key"
 
 username = "admin"
