@@ -6,6 +6,9 @@ from agents.planner_executor.tool_helpers.tool_param_types import (
     ListWithDefault,
 )
 
+from agents.planner_executor.toolboxes.plots.tools import line_plot
+
+
 async def t_test(
     full_data: pd.DataFrame,
     group_column: DBColumn,
@@ -23,7 +26,7 @@ async def t_test(
     """
     import pandas as pd
     from scipy import stats
-    
+
     print(group_column)
     print(score_column)
     reactive_vars = {}
@@ -44,7 +47,7 @@ async def t_test(
     # if there are more than 2 groups, we can't run t tests, so return an error
     if len(groups) > 2:
         return {
-            "error_message": "More than 2 groups. Consider running a Wilcoxon test."
+            "error_message": "More than 2 groups. Consider running ANOVA or Wilcoxon test."
         }
 
     # run an unpaired t-test
@@ -205,6 +208,140 @@ async def wilcoxon_test(
                 "data": wilcoxon_df,
                 "reactive_vars": reactive_vars,
                 "analysis": analysis,
+            }
+        ],
+    }
+
+
+async def anova_test(
+    full_data: pd.DataFrame,
+    group_column: DBColumn,
+    score_column: DBColumn,
+    global_dict: dict = {},
+    **kwargs,
+):
+    """
+    This function gets multple samples and runs an ANOVA test to check if there is a significant difference between their means.
+    """
+    import pandas as pd
+
+    df = full_data.dropna(subset=[group_column, score_column])
+
+    # run an ANOVA test
+    from statsmodels.stats.oneway import anova_oneway
+
+    res = anova_oneway(
+        df[score_column], df[group_column], use_var="unequal", welch_correction=True
+    )
+
+    statistic, pvalue = res
+    analysis = f"ANOVA test between:\nGroups: {df[group_column].unique().tolist()}\nstatistic: {statistic:.4f}\np-value: {pvalue:.4f}\n"
+    if pvalue < 0.05:
+        significance = "a"
+        direction = "positive " if statistic > 0 else "negative "
+    else:
+        significance = "no"
+        direction = ""
+    analysis += f"\nThere is {significance} significant {direction}difference between the means of the groups."
+
+    # save statistic and p_value into a dataframe
+    reactive_vars = {
+        "ANOVA test": {
+            "statistic": statistic,
+            "p_value": pvalue,
+        }
+    }
+    anova_df = pd.DataFrame(
+        {
+            "test_type": ["ANOVA test"],
+            "statistic": [statistic],
+            "p_value": [pvalue],
+        }
+    )
+    anova_df.reactive_vars = reactive_vars
+    return {
+        "outputs": [
+            {
+                "data": anova_df,
+                "reactive_vars": reactive_vars,
+                "analysis": analysis,
+            }
+        ],
+    }
+
+
+async def fold_change(
+    full_data: pd.DataFrame,
+    value_column: DBColumn,
+    individual_id_column: DBColumn,
+    time_column: DBColumn,
+    group_column: DBColumn = None,
+    global_dict: dict = {},
+):
+    """
+    This function calculates the fold change between two groups of values.
+    """
+    from tool_code_utilities import natural_sort
+
+    df = full_data.dropna(subset=[value_column, individual_id_column, time_column])
+
+    if group_column is not None:
+        id_group = (
+            df.dropna(subset=[individual_id_column, group_column])
+            .set_index(individual_id_column)[group_column]
+            .to_dict()
+        )
+    if len(df) == 0:
+        return {"error_message": "No data to calculate fold change."}
+
+    df = (
+        df.groupby([individual_id_column, time_column])[value_column]
+        .mean()
+        .reset_index()
+    )
+    df = natural_sort(df, time_column, individual_id_column)
+
+    # calculate the fold change for each group, which is the ratio of the value in first time_column to the value in a given time_column
+    fold_change_df = df.pivot(
+        index=time_column, columns=individual_id_column, values=value_column
+    )
+    fold_change_df = fold_change_df / fold_change_df.iloc[0]
+    # fold_change_df = fold_change_df.dropna(how="all", axis=1).reset_index()
+
+    # unpivot the dataframe
+    fold_change_df = fold_change_df.reset_index()
+    fold_change_df_melted = fold_change_df.melt(
+        id_vars=[time_column], var_name=individual_id_column, value_name="fold_change"
+    )
+
+    # plot charts – we always want to create a line chart here
+    fold_change_df_melted = natural_sort(
+        fold_change_df_melted, time_column, individual_id_column
+    )
+
+    if group_column is not None:
+        fold_change_df_melted[group_column] = fold_change_df_melted[
+            individual_id_column
+        ].map(id_group.get)
+
+    # plot the fold change
+    resp = await line_plot(
+        fold_change_df_melted,
+        time_column,
+        "fold_change",
+        units=individual_id_column,
+        facet_column=group_column,
+    )
+    return {
+        "outputs": [
+            {
+                "data": fold_change_df,
+                "chart_images": [
+                    {
+                        "type": "lineplot",
+                        "path": resp["outputs"][0]["chart_images"][0]["path"],
+                    }
+                ],
             }
         ],
     }

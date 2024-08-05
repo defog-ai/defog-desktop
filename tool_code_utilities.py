@@ -3,24 +3,25 @@
 # from tool_code_utilities import xx
 
 import asyncio
+import yaml
 from defog import Defog
 from defog.query import execute_query
 import re
+import json
 import pandas as pd
 import os
-from db_utils import get_api_key
+from db_utils import get_db_type_creds
 
-from pathlib import Path
-home_dir = Path.home()
+report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
 
-# see if we have a custom report assets directory
-if not os.path.exists(home_dir / "defog_report_assets"):
-    # create one
-    os.mkdir(home_dir / "defog_report_assets")
 
-report_assets_dir = home_dir / "defog_report_assets"
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+available_colors = plt.colormaps()
+
+sns.set_palette(["#009D94", "#FF5C1C", "#0057CF", "#691A6B", "#FFBD00"])
+
 
 # make sure the query does not contain any malicious commands like drop, delete, etc.
 def safe_sql(query):
@@ -41,20 +42,32 @@ def safe_sql(query):
     return True
 
 
-async def fetch_query_into_df(sql_query: str) -> pd.DataFrame:
+async def fetch_query_into_df(
+    api_key: str, sql_query: str, temp: bool = False
+) -> pd.DataFrame:
     """
     Runs a sql query and stores the results in a pandas dataframe.
     """
 
     # important note: this is currently a blocking call
     # TODO: add an option to the defog library to make this async
-    defog = Defog()
-    db_type = defog.db_type
-    db_creds = defog.db_creds
+    if not temp:
+        res = get_db_type_creds(api_key)
+        db_type, db_creds = res
+    else:
+        db_type = "postgres"
+        db_creds = {
+            "host": "agents-postgres",
+            "port": 5432,
+            "database": "postgres",
+            "user": "postgres",
+            "password": "postgres",
+        }
 
     colnames, data, new_sql_query = await asyncio.to_thread(
-        execute_query, sql_query, get_api_key(), db_type, db_creds, retries=0
+        execute_query, sql_query, api_key, db_type, db_creds, retries=2, temp=temp
     )
+
     df = pd.DataFrame(data, columns=colnames)
 
     # if this df has any columns that have lists, remove those columns
@@ -62,8 +75,13 @@ async def fetch_query_into_df(sql_query: str) -> pd.DataFrame:
         if df[col].apply(type).eq(list).any():
             df = df.drop(col, axis=1)
 
+    if new_sql_query:
+        sql_query = new_sql_query
+    else:
+        sql_query = sql_query
+
     df.sql_query = sql_query
-    return df
+    return df, sql_query
 
 
 def natural_sort_function(l, ascending=True):
@@ -96,10 +114,14 @@ def natural_sort(df, time_column, units=None, ascending=True):
     Sorts a dataframe in a natural way, using the natural_sort_function.
     """
     if df[time_column].dtype == "object":
-        order = natural_sort_function(df[time_column].unique().tolist())
-        df[time_column] = pd.Categorical(
-            df[time_column], categories=order, ordered=True
-        )
+        try:
+            order = natural_sort_function(df[time_column].unique().tolist())
+            df[time_column] = pd.Categorical(
+                df[time_column], categories=order, ordered=True
+            )
+        except Exception as e:
+            # if there are any errors, just pass
+            pass
         if units:
             df = df.sort_values(by=[units, time_column], ascending=ascending)
         else:
@@ -117,6 +139,7 @@ default_top_level_imports = "\n\n".join(
         "  ListWithDefault,",
         "  db_column_list_type_creator,",
         ")",
+        "from tool_code_utilities import available_colors",
         "import pandas",
         "import pandas as pd",
     ]

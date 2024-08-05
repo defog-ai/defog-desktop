@@ -1,3 +1,4 @@
+import json
 import traceback
 import datetime
 import uuid
@@ -9,47 +10,34 @@ from sqlalchemy import (
     insert,
     delete,
 )
-import sqlalchemy.ext.automap
+from sqlalchemy.ext.automap import automap_base
 
 import asyncio
 from utils import warn_str, YieldList, make_request
 import os
-from pathlib import Path
-home_dir = Path.home()
 
-# see if we have a custom report assets directory
-if not os.path.exists(home_dir / "defog_report_assets"):
-    # create one
-    os.mkdir(home_dir / "defog_report_assets")
+report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
 
-    # create all the subdirectories
-    os.mkdir(home_dir / "defog_report_assets" / "datasets")
-
-report_assets_dir = home_dir / "defog_report_assets"
-
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
-
-db_creds = {
-    "user": os.environ.get("DBUSER"),
-    "password": os.environ.get("DBPASSWORD"),
-    "host": os.environ.get("DBHOST"),
-    "port": os.environ.get("DBPORT"),
-    "database": os.environ.get("DATABASE"),
-}
-
-if os.environ.get("INTERNAL_DB", "sqlite") == "sqlite":
+if os.environ.get("INTERNAL_DB") == "sqlite":
     print("using sqlite as our internal db")
     # if using sqlite
-    path_to_sql_file = home_dir / "defog_local.db"
-    connection_uri = f"sqlite:///{path_to_sql_file}"
+    connection_uri = "sqlite:///defog_local.db"
     engine = create_engine(connection_uri, connect_args={"timeout": 3})
 else:
+    db_creds = {
+        "user": os.environ["DBUSER"],
+        "password": os.environ["DBPASSWORD"],
+        "host": os.environ["DBHOST"],
+        "port": os.environ["DBPORT"],
+        "database": os.environ["DATABASE"],
+    }
+
     # if using postgres
     print("using postgres as our internal db")
     connection_uri = f"postgresql://{db_creds['user']}:{db_creds['password']}@{db_creds['host']}:{db_creds['port']}/{db_creds['database']}"
     engine = create_engine(connection_uri)
 
-Base = sqlalchemy.ext.automap.automap_base()
+Base = automap_base()
 
 # reflect the tables
 Base.prepare(autoload_with=engine)
@@ -63,6 +51,79 @@ Toolboxes = Base.classes.defog_toolboxes
 Tools = Base.classes.defog_tools
 Users = Base.classes.defog_users
 Feedback = Base.classes.defog_plans_feedback
+DbCreds = Base.classes.defog_db_creds
+
+
+def save_csv_to_db(table_name, data):
+    df = pd.DataFrame(data[1:], columns=data[0])
+    if "" in df.columns:
+        del df[""]
+    print(df)
+    try:
+        df.to_sql(table_name, engine, if_exists="replace", index=False)
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
+
+def get_db_type_creds(api_key):
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(DbCreds.db_type, DbCreds.db_creds).where(DbCreds.api_key == api_key)
+        ).fetchone()
+
+    print(row)
+
+    return row
+
+
+def update_db_type_creds(api_key, db_type, db_creds):
+    with engine.begin() as conn:
+        # first, check if the record exists
+        record = conn.execute(
+            select(DbCreds).where(DbCreds.api_key == api_key)
+        ).fetchone()
+
+        if record:
+            conn.execute(
+                update(DbCreds)
+                .where(DbCreds.api_key == api_key)
+                .values(db_type=db_type, db_creds=db_creds)
+            )
+        else:
+            conn.execute(
+                insert(DbCreds).values(
+                    api_key=api_key, db_type=db_type, db_creds=db_creds
+                )
+            )
+
+    return True
+
+
+def validate_user(token, user_type=None, get_username=False):
+    with engine.begin() as conn:
+        user = conn.execute(
+            select(Users).where(Users.hashed_password == token)
+        ).fetchone()
+
+    if user:
+        if user_type == "admin":
+            if user[0] == "admin":
+                if get_username:
+                    return user[1]
+                else:
+                    return True
+            else:
+                return False
+        else:
+            if get_username:
+                return user[1]
+            else:
+                return True
+    else:
+        return False
+
 
 async def execute_code(codestr):
     """
@@ -77,51 +138,20 @@ async def execute_code(codestr):
         analysis, full_data = await globals()["exec_code"]()
         full_data.code_str = codestr
     except Exception as e:
-        # traceback.print_exc()
+        traceback.print_exc()
         err = e
         analysis = None
         full_data = None
     finally:
         return err, analysis, full_data
 
-def get_api_key():
-    with engine.begin() as conn:
-        api_key = conn.execute(
-            select(Users.token).where(Users.user_type == "admin")
-        ).fetchone()
-    if api_key:
-        return api_key[0]
-    else:
-        return None
 
-def validate_user(token, user_type=None, get_username=False):
-    with engine.begin() as conn:
-        user = conn.execute(
-            select(Users).where(Users.hashed_password == token)
-        ).fetchone()
-
-    if user:
-        if user_type == "admin":
-            if user.user_type == "admin":
-                if get_username:
-                    return user.username
-                else:
-                    return True
-            else:
-                return False
-        else:
-            if get_username:
-                return user[0]
-            else:
-                return True
-    else:
-        return False
-
-
-async def initialise_report(user_question, token, custom_id=None, other_data={}):
+async def initialise_report(
+    user_question, token, api_key, custom_id=None, other_data={}
+):
     username = validate_user(token, get_username=True)
     if not username:
-        return {"success": False, "error_message": "Invalid token."}
+        return "Invalid token.", None
 
     err = None
     timestamp = str(datetime.datetime.now())
@@ -129,10 +159,6 @@ async def initialise_report(user_question, token, custom_id=None, other_data={})
 
     try:
         """Create a new report in the defog_reports table"""
-        # err_validate = validate_user(DEFOG_API_KEY)
-
-        # if DEFOG_API_KEY == "" or DEFOG_API_KEY is None or not DEFOG_API_KEY or err_validate is not None:
-        #     err = err_validate or "Your API Key is invalid."
         with engine.begin() as conn:
             if not custom_id or custom_id == "":
                 report_id = str(uuid.uuid4())
@@ -143,7 +169,7 @@ async def initialise_report(user_question, token, custom_id=None, other_data={})
                 "user_question": user_question,
                 "timestamp": timestamp,
                 "report_id": report_id,
-                "api_key": get_api_key(),
+                "api_key": api_key,
                 "username": username,
             }
             if other_data is not None and type(other_data) is dict:
@@ -182,34 +208,12 @@ async def initialise_report(user_question, token, custom_id=None, other_data={})
                         )
 
     except Exception as e:
-        # traceback.print_exc()
+        traceback.print_exc()
         print(e)
         err = "Could not create a new report."
         new_report_data = None
     finally:
         return err, new_report_data
-
-
-def add_report_markdown(report_markdown, report_id):
-    """Add report's markdown to defog_reports table"""
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                update(Reports)
-                .where(
-                    Reports.report_id == report_id,
-                    Reports.api_key == get_api_key(),
-                )
-                .values(report_markdown=report_markdown)
-            )
-
-        return {"success": True}
-    except Exception as e:
-        # traceback.print_exc()
-        return {
-            "success": False,
-            "error_message": "Server error. Could not save report.",
-        }
 
 
 def get_report_data(report_id):
@@ -243,7 +247,7 @@ def get_report_data(report_id):
         err = "Server error. Please contact us."
         report_data = None
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
 
     finally:
         return err, report_data
@@ -341,15 +345,12 @@ async def update_report_data(
                         )
                 else:
                     err = "Report not found."
-                    print("\n\n\n")
-                    print(err)
-                    print("\n\n\n")
                     raise ValueError(err)
 
     except Exception as e:
         err = str(e)
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
     finally:
         return err
 
@@ -408,13 +409,13 @@ def report_data_from_row(row):
 
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         rpt = None
     finally:
         return rpt
 
 
-def get_all_reports():
+def get_all_reports(api_key: str):
     # get reports from the reports table
     err = None
     reports = []
@@ -422,7 +423,7 @@ def get_all_reports():
         with engine.begin() as conn:
             # first get the data
             rows = conn.execute(
-                select(Reports).where(Reports.api_key == get_api_key())
+                select(Reports).where(Reports.api_key == api_key)
             ).fetchall()
             if len(rows) > 0:
                 # reshape with "success = true"
@@ -432,17 +433,17 @@ def get_all_reports():
                         reports.append(rpt)
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         err = "Something went wrong while fetching your reports. Please contact us."
         reports = None
     finally:
         return err, reports
 
 
-async def add_to_recently_viewed_docs(token, doc_id, timestamp):
+async def add_to_recently_viewed_docs(token, doc_id, timestamp, api_key):
     username = validate_user(token, get_username=True)
     if not username:
-        return {"success": False, "error_message": "Invalid token."}
+        return "Invalid token."
     try:
         print("Adding to recently viewed docs for user: ", username)
         with engine.begin() as conn:
@@ -451,7 +452,7 @@ async def add_to_recently_viewed_docs(token, doc_id, timestamp):
             row = conn.execute(
                 select(RecentlyViewedDocs)
                 .where(RecentlyViewedDocs.username == username)
-                .where(RecentlyViewedDocs.api_key == get_api_key())
+                .where(RecentlyViewedDocs.api_key == api_key)
             ).fetchone()
 
             if row:
@@ -477,7 +478,7 @@ async def add_to_recently_viewed_docs(token, doc_id, timestamp):
                 conn.execute(
                     update(RecentlyViewedDocs)
                     .where(RecentlyViewedDocs.username == username)
-                    .where(RecentlyViewedDocs.api_key == get_api_key())
+                    .where(RecentlyViewedDocs.api_key == api_key)
                     .values(recent_docs=recent_docs)
                 )
             else:
@@ -485,7 +486,7 @@ async def add_to_recently_viewed_docs(token, doc_id, timestamp):
                 conn.execute(
                     insert(RecentlyViewedDocs).values(
                         {
-                            "api_key": get_api_key(),
+                            "api_key": api_key,
                             "username": username,
                             "recent_docs": [[doc_id, timestamp]],
                         }
@@ -493,14 +494,14 @@ async def add_to_recently_viewed_docs(token, doc_id, timestamp):
                 )
     except Exception as e:
         print(e)
-        # # traceback.print_exc()
+        # traceback.print_exc()
         print("Could not add to recently viewed docs\n")
 
 
-async def get_doc_data(doc_id, token, col_name="doc_blocks"):
+async def get_doc_data(api_key, doc_id, token, col_name="doc_blocks"):
     username = validate_user(token, get_username=True)
     if not username:
-        return {"success": False, "error_message": "Invalid token."}
+        return "Invalid token.", None
     err = None
     timestamp = str(datetime.datetime.now())
     doc_data = None
@@ -508,10 +509,6 @@ async def get_doc_data(doc_id, token, col_name="doc_blocks"):
     try:
         """Find the document with the id in the Docs table.
         If it doesn't exist, create one and return empty data."""
-        # err_validate = validate_user(DEFOG_API_KEY)
-
-        # if DEFOG_API_KEY == "" or DEFOG_API_KEY is None or not DEFOG_API_KEY or err_validate is not None:
-        #     err = err_validate or "Your API Key is invalid."
         with engine.begin() as conn:
             # check if document exists
             row = conn.execute(select(Docs).where(Docs.doc_id == doc_id)).fetchone()
@@ -539,7 +536,7 @@ async def get_doc_data(doc_id, token, col_name="doc_blocks"):
                     insert(Docs).values(
                         {
                             "doc_id": doc_id,
-                            "api_key": get_api_key(),
+                            "api_key": api_key,
                             "doc_blocks": None,
                             "doc_xml": None,
                             "doc_uint8": None,
@@ -550,7 +547,7 @@ async def get_doc_data(doc_id, token, col_name="doc_blocks"):
                 )
 
     except Exception as e:
-        # traceback.print_exc()
+        traceback.print_exc()
         print(e)
         err = "Could not create a new report."
         doc_data = None
@@ -568,14 +565,11 @@ async def delete_doc(doc_id):
                 print("Deleted doc with id: ", doc_id)
             else:
                 err = "Doc not found."
-                print("\n\n\n")
-                print(err)
-                print("\n\n\n")
                 raise ValueError(err)
     except Exception as e:
         err = str(e)
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
     finally:
         return err
 
@@ -599,14 +593,11 @@ async def update_doc_data(doc_id, col_names=[], new_data={}):
                 conn.execute(update(Docs).where(Docs.doc_id == doc_id).values(new_data))
             else:
                 err = "Doc not found."
-                print("\n\n\n")
-                print(err)
-                print("\n\n\n")
                 raise ValueError(err)
     except Exception as e:
         err = str(e)
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
     finally:
         return err
 
@@ -624,7 +615,7 @@ def create_table_chart(table_data):
     except Exception as e:
         err = str(e)
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
     finally:
         return err
 
@@ -697,7 +688,7 @@ async def update_table_chart_data(table_id, edited_table_data):
         analysis = None
         updated_data = None
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
     finally:
         return err, analysis, updated_data
 
@@ -724,7 +715,7 @@ async def get_table_data(table_id):
                 err = "Table not found."
 
     except Exception as e:
-        # traceback.print_exc()
+        traceback.print_exc()
         print(e)
         err = "Could not find table."
         table_data = None
@@ -735,18 +726,13 @@ async def get_table_data(table_id):
 async def get_all_docs(token):
     username = validate_user(token, get_username=True)
     if not username:
-        return {"success": False, "error_message": "Invalid token."}
+        return "Invalid token.", None, None
     # get reports from the reports table
     err = None
     own_docs = []
     recently_viewed_docs = []
     try:
         """Get docs for a user from the defog_docs table"""
-        # err_validate = validate_user(DEFOG_API_KEY)
-
-        # if DEFOG_API_KEY == "" or DEFOG_API_KEY is None or not DEFOG_API_KEY or err_validate is not None:
-        #     err = err_validate or "Your API Key is invalid."
-
         with engine.begin() as conn:
             # first get the data
             rows = conn.execute(
@@ -802,7 +788,7 @@ async def get_all_docs(token):
 
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         err = "Something went wrong while fetching your documents. Please contact us."
         own_docs = None
         recently_viewed_docs = None
@@ -810,17 +796,12 @@ async def get_all_docs(token):
         return err, own_docs, recently_viewed_docs
 
 
-async def get_all_analyses():
+async def get_all_analyses(api_key: str):
     # get reports from the reports table
     err = None
     analyses = []
     try:
         """Create a new report in the defog_reports table"""
-        # err_validate = validate_user(DEFOG_API_KEY)
-
-        # if DEFOG_API_KEY == "" or DEFOG_API_KEY is None or not DEFOG_API_KEY or err_validate is not None:
-        #     err = err_validate or "Your API Key is invalid."
-
         with engine.begin() as conn:
             # first get the data
             rows = conn.execute(
@@ -830,7 +811,7 @@ async def get_all_analyses():
                         Reports.__table__.columns["user_question"],
                     ]
                 )
-                .where(Reports.api_key == get_api_key())
+                .where(Reports.api_key == api_key)
                 .where(Reports.report_id.contains("analysis"))
             ).fetchall()
 
@@ -838,7 +819,7 @@ async def get_all_analyses():
                 for row in rows:
                     analyses.append(row._mapping)
     except Exception as e:
-        # traceback.print_exc()
+        traceback.print_exc()
         print(e)
         err = "Could not find analyses for the user."
         analyses = []
@@ -849,7 +830,7 @@ async def get_all_analyses():
 async def get_toolboxes(token):
     username = validate_user(token, get_username=True)
     if not username:
-        return {"success": False, "error_message": "Invalid token."}
+        return "Invalid token.", None
     # table is defog_agent_toolboxes
     # get all toolboxes available to a user using the username
     err = None
@@ -867,14 +848,14 @@ async def get_toolboxes(token):
                     continue
 
                 if row_dict["toolboxes"][0] == "*":
-                    toolboxes = ["data-fetching", "stats"]
+                    toolboxes = ["data-fetching", "stats", "plots", "cancer-survival"]
                     break
 
                 else:
                     toolboxes += row_dict["toolboxes"]
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         err = "Could not fetch toolboxes for the user."
         toolboxes = []
     finally:
@@ -961,6 +942,19 @@ async def store_tool_run(analysis_id, step, run_result, skip_step_update=False):
                         float_format="%.3f", index=False
                     )
 
+                    # de-duplicate column names
+                    # if the same column name exists more than once, add a suffix
+                    columns = data.columns.tolist()
+                    seen = {}
+                    for i, item in enumerate(columns):
+                        if item in seen:
+                            columns[i] = f"{item}_{seen[item]}"
+                            seen[item] += 1
+                        else:
+                            seen[item] = 1
+
+                    data.columns = columns
+
                     # have to reset index for feather to work
                     data.reset_index(drop=True).to_feather(
                         report_assets_dir + "/datasets/" + db_path
@@ -986,7 +980,7 @@ async def store_tool_run(analysis_id, step, run_result, skip_step_update=False):
                         ]
                     except Exception as e:
                         print(e)
-                        # traceback.print_exc()
+                        traceback.print_exc()
                         print("Could not store chart images to gcs")
 
                 # check if it has analysis
@@ -1030,7 +1024,7 @@ async def store_tool_run(analysis_id, step, run_result, skip_step_update=False):
         return {"success": True, "tool_run_data": insert_data}
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         print("Could not store tool run")
         return {"success": False, "error_message": str(e)}
 
@@ -1045,13 +1039,13 @@ async def get_tool_run(tool_run_id):
             ).fetchall()
 
             if len(rows) == 0:
-                return {"success": False, "error_message": "Tool run not found"}
+                return "Tool run not found", None
 
             row = rows[0]
             tool_run_data = row._mapping
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         print("Could not fetch tool run")
         tool_run_data = None
         error = str(e)
@@ -1186,18 +1180,18 @@ async def update_tool_run_data(analysis_id, tool_run_id, prop, new_val):
                     .values(outputs=new_val, edited=False)
                 )
 
-            with engine.begin() as conn:
-                row = conn.execute(
-                    select(ToolRuns).where(ToolRuns.tool_run_id == tool_run_id)
-                ).fetchone()
+        with engine.begin() as conn:
+            row = conn.execute(
+                select(ToolRuns).where(ToolRuns.tool_run_id == tool_run_id)
+            ).fetchone()
 
-            if row is not None:
-                new_data = dict(row._mapping)
+        if row is not None:
+            new_data = dict(row._mapping)
 
         return {"success": True, "tool_run_data": new_data}
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         print("Could not fetch tool run")
         error = str(e)
         return {"success": False, "error_message": str(e)}
@@ -1223,7 +1217,7 @@ def get_multiple_reports(report_ids=[], columns=["report_id", "user_question"]):
                 for row in rows:
                     analyses.append(row._mapping)
     except Exception as e:
-        # traceback.print_exc()
+        traceback.print_exc()
         print(e)
         err = "Could not find analyses for the user."
         analyses = []
@@ -1232,6 +1226,7 @@ def get_multiple_reports(report_ids=[], columns=["report_id", "user_question"]):
 
 
 async def store_feedback(
+    api_key,
     user_question,
     analysis_id,
     is_correct,
@@ -1243,9 +1238,9 @@ async def store_feedback(
 
     asyncio.create_task(
         make_request(
-            f"{os.environ.get('DEFOG_BASE_URL', 'https://api.defog.ai')}/update_agent_feedback",
+            f"{os.environ['DEFOG_BASE_URL']}/update_agent_feedback",
             {
-                "api_key": get_api_key(),
+                "api_key": api_key,
                 "user_question": user_question,
                 "analysis_id": analysis_id,
                 "is_correct": is_correct,
@@ -1286,7 +1281,7 @@ def get_all_tools():
 
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         err = str(e)
         tools = []
     finally:
@@ -1294,6 +1289,7 @@ def get_all_tools():
 
 
 async def add_tool(
+    api_key,
     tool_name,
     function_name,
     description,
@@ -1303,7 +1299,6 @@ async def add_tool(
     toolbox,
     cannot_delete=False,
     cannot_disable=False,
-    add_to_server=True
 ):
     err = None
     try:
@@ -1345,34 +1340,59 @@ async def add_tool(
                         }
                     )
                 )
-        
-        if add_to_server:
-            print("Adding tool to the defog API server", tool_name)
-            asyncio.create_task(
-                make_request(
-                    url=f"{os.environ.get('DEFOG_BASE_URL', 'https://api.defog.ai')}/update_tool",
-                    payload={
-                        "api_key": get_api_key(),
-                        "tool_name": tool_name,
-                        "function_name": function_name,
-                        "description": description,
-                        "code": code,
-                        "embedding": embedding,
-                        "input_metadata": input_metadata,
-                        "output_metadata": output_metadata,
-                        "toolbox": toolbox,
-                        "disabled": False,
-                        "cannot_delete": cannot_delete,
-                        "cannot_disable": cannot_disable,
-                    },
-                    verbose=True,
-                )
+
+        print("Adding tool to the defog API server", tool_name)
+        asyncio.create_task(
+            make_request(
+                url=f"{os.environ['DEFOG_BASE_URL']}/update_tool",
+                payload={
+                    "api_key": api_key,
+                    "tool_name": tool_name,
+                    "function_name": function_name,
+                    "description": description,
+                    "code": code,
+                    "embedding": embedding,
+                    "input_metadata": input_metadata,
+                    "output_metadata": output_metadata,
+                    "toolbox": toolbox,
+                    "disabled": False,
+                    "cannot_delete": cannot_delete,
+                    "cannot_disable": cannot_disable,
+                },
+                verbose=True,
             )
+        )
     except ValueError as e:
         err = str(e)
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
+        err = str(e)
+    finally:
+        return err
+
+
+async def update_tool(function_name, update_dict):
+    err = None
+    try:
+        with engine.begin() as conn:
+            # check if tool exists
+            row = conn.execute(
+                select(Tools).where(Tools.function_name == function_name)
+            ).fetchone()
+
+            if row is None:
+                raise ValueError(f"Tool {function_name} does not exist.")
+            else:
+                # update with latest
+                conn.execute(
+                    update(Tools)
+                    .where(Tools.function_name == function_name)
+                    .values(update_dict)
+                )
+    except Exception as e:
+        print(e)
+        traceback.print_exc()
         err = str(e)
     finally:
         return err
@@ -1403,7 +1423,7 @@ async def toggle_disable_tool(function_name):
                 )
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         err = str(e)
     finally:
         return err
@@ -1427,7 +1447,7 @@ async def delete_tool(function_name):
                 conn.execute(delete(Tools).where(Tools.function_name == function_name))
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         err = str(e)
     finally:
         return err
@@ -1454,7 +1474,7 @@ async def get_analysis_versions(root_analysis_id):
             versions = [{"analysis_id": x[0], "user_question": x[1]} for x in rows]
     except Exception as e:
         print(e)
-        # traceback.print_exc()
+        traceback.print_exc()
         err = str(e)
     finally:
         return err, versions
@@ -1480,10 +1500,22 @@ async def get_analysis_question_context(analysis_id, max_n=5):
             if err:
                 raise Exception(err)
 
-            question_context = analysis_data["user_question"] + " " + question_context
             if analysis_data["direct_parent_id"] and count <= max_n:
                 curr_analysis_id = analysis_data["direct_parent_id"]
                 count += 1
+
+                # skip if analysis was not fully completed
+                # aka has no steps
+                if (
+                    not analysis_data["gen_steps"]
+                    or len(analysis_data["gen_steps"]) == 0
+                ):
+                    continue
+
+                # else add this q to context
+                question_context = (
+                    analysis_data["user_question"] + " " + question_context
+                )
             else:
                 break
 

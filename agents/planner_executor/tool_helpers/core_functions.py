@@ -1,30 +1,29 @@
 from typing import Dict, List
+import tiktoken
 from datetime import date
-import traceback
 import pandas as pd
-from defog import Defog
-from defog.query import execute_query
-import asyncio
 import base64
 import os
-from db_utils import get_api_key
 
 # these are needed for the exec_code function
 import pandas as pd
 
+from openai import AsyncOpenAI
+
+# get OPENAI_API_KEY from env
+
 openai = None
 
-from pathlib import Path
-home_dir = Path.home()
+if (
+    os.environ.get("OPENAI_API_KEY") is None
+    or os.environ.get("OPENAI_API_KEY") == "None"
+    or os.environ.get("OPENAI_API_KEY") == ""
+):
+    print("OPENAI_API_KEY not found in env")
+else:
+    openai = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# see if we have a custom report assets directory
-if not os.path.exists(home_dir / "defog_report_assets"):
-    # create one
-    os.mkdir(home_dir / "defog_report_assets")
-
-report_assets_dir = home_dir / "defog_report_assets"
-
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
 
 
 def encode_image(image_path):
@@ -49,35 +48,29 @@ def safe_sql(query):
         or "append" in query
         or "insert" in query
         or "update" in query
+        or "create" in query
     ):
         return False
 
     return True
 
 
-async def fetch_query_into_df(sql_query: str) -> pd.DataFrame:
+def estimate_tokens_left(messages: List[Dict], model: str) -> int:
     """
-    Runs a sql query and stores the results in a pandas dataframe.
+    Returns an estimate of the number of tokens left for generation based on the
+    messages generated so far and the model used.
     """
-
-    # important note: this is currently a blocking call
-    # TODO: add an option to the defog library to make this async
-    defog = Defog()
-    db_type = defog.db_type
-    db_creds = defog.db_creds
-
-    colnames, data, new_sql_query = await asyncio.to_thread(
-        execute_query, sql_query, get_api_key(), db_type, db_creds, retries=2
-    )
-    df = pd.DataFrame(data, columns=colnames)
-
-    # if this df has any columns that have lists, remove those columns
-    for col in df.columns:
-        if df[col].apply(type).eq(list).any():
-            df = df.drop(col, axis=1)
-
-    df.sql_query = sql_query
-    return df
+    encoding = tiktoken.encoding_for_model(model)
+    total_tokens = 0
+    for msg in messages:
+        num_tokens = len(encoding.encode(msg["content"]))
+        total_tokens += num_tokens
+    if model == "gpt-3.5-turbo":
+        return 4000 - total_tokens
+    elif "gpt-4" in model:
+        return 8000 - total_tokens
+    else:
+        raise ValueError(f"Unsupported model {model}")
 
 
 # resolves an input to a tool
@@ -116,5 +109,77 @@ async def analyse_data(
     """
     Generate a short summary of the results for the given qn.
     """
-    yield {"success": False, "model_analysis": "NONE"}
-    return
+    if not openai:
+        yield {"success": False, "model_analysis": "NONE"}
+        return
+
+    if data is None:
+        yield {"success": False, "model_analysis": "No data found"}
+        return
+
+    if data.size > 50 and image_path is None:
+        yield {"success": False, "model_analysis": "NONE"}
+        return
+
+    if question is None or question == "":
+        yield {"success": False, "model_analysis": "No question provided"}
+        return
+
+    if image_path:
+        base64_image = encode_image(image_path)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"An image was generated to answer this question: `{question}`. Please interpret the results of this image for me. Do not repeat the data in the image verbatim. Instead, focus on the key insights and takeaways. Assume that your audience is a non-technical stakeholder who is interested in high level insights but do not want the exact numbers in the image to be repeated.",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64_image}",
+                            "detail": "low",
+                        },
+                    },
+                ],
+            },
+        ]
+    else:
+        df_csv = data.to_csv(float_format="%.3f", header=True)
+        user_analysis_prompt = f"""Generate a short summary of the results for the given qn: `{question}`\n\nand results:
+    {df_csv}\n\n```"""
+        analysis_prompt = f"""Here is the brief summary of how the results answer the given qn:\n\n```"""
+        # get comma separated list of col names
+        col_names = ",".join(data.columns)
+
+        messages = [
+            {
+                "role": "assistant",
+                "content": f"User has the following columns available to them:\n\n"
+                + col_names
+                + "\n\n",
+            },
+            {"role": "user", "content": user_analysis_prompt},
+            {
+                "role": "assistant",
+                "content": analysis_prompt,
+            },
+        ]
+
+    completion = await openai.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        temperature=0,
+        seed=42,
+        stream=True,
+        max_tokens=400,
+    )
+
+    async for chunk in completion:
+        ct = chunk.choices[0]
+
+        if ct.finish_reason == "stop":
+            return
+
+        yield {"success": True, "model_analysis": ct.delta.content}

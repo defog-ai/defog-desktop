@@ -3,9 +3,11 @@
 from copy import deepcopy
 from uuid import uuid4
 
+from colorama import Fore, Style
+
 from agents.planner_executor.execute_tool import execute_tool
 from agents.planner_executor.tool_helpers.core_functions import resolve_input
-from db_utils import get_analysis_question_context, store_tool_run, get_api_key
+from db_utils import get_analysis_question_context, store_tool_run
 from utils import warn_str, YieldList
 from .tool_helpers.toolbox_manager import get_tool_library_prompt
 from .tool_helpers.tool_param_types import ListWithDefault
@@ -18,18 +20,8 @@ import pandas as pd
 import os
 
 
-llm_calls_url = os.environ.get("LLM_CALLS_URL", "https://api.defog.ai/agent_endpoint")
-from pathlib import Path
-home_dir = Path.home()
-
-# see if we have a custom report assets directory
-if not os.path.exists(home_dir / "defog_report_assets"):
-    # create one
-    os.mkdir(home_dir / "defog_report_assets")
-
-report_assets_dir = home_dir / "defog_report_assets"
-
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+llm_calls_url = os.environ["LLM_CALLS_URL"]
+report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
 
 
 class Executor:
@@ -40,6 +32,7 @@ class Executor:
 
     def __init__(
         self,
+        dfg_api_key,
         report_id,
         user_question,
         assignment_understanding,
@@ -47,11 +40,12 @@ class Executor:
         parent_analyses=[],
         similar_plans=[],
         dev=False,
+        temp=False,
         predefined_steps=None,
         direct_parent_analysis=None,
     ):
         self.user_question = user_question
-        self.dfg_api_key = get_api_key()
+        self.dfg_api_key = dfg_api_key
         self.toolboxes = toolboxes
         self.assignment_understanding = assignment_understanding
         self.analysis_id = report_id
@@ -61,16 +55,18 @@ class Executor:
         self.predefined_steps = predefined_steps
         self.direct_parent_analysis = direct_parent_analysis
         self.dev = dev
+        self.temp = temp
 
         self.global_dict = {
             "user_question": user_question,
-            "dfg_api_key": get_api_key(),
+            "dfg_api_key": dfg_api_key,
             "toolboxes": toolboxes,
             "assignment_understanding": assignment_understanding,
             "dfg": None,
             "llm_calls_url": llm_calls_url,
             "report_assets_dir": report_assets_dir,
             "dev": dev,
+            "temp": temp,
         }
 
         # keep storing store column names of each step's generated data
@@ -138,9 +134,25 @@ class Executor:
                             "direct_parent_analysis": self.direct_parent_analysis,
                             "api_key": self.dfg_api_key,
                             "plan_id": self.analysis_id,
+                            "model_name": "defog/agents-llama-8b-instruct",
+                            "llm_server_url": os.environ.get(
+                                "LLM_SERVER_ENDPOINT", None
+                            ),
+                            "dev": self.dev,
+                            "temp": self.temp,
                         }
                         ans = await asyncio.to_thread(requests.post, url, json=payload)
                     else:
+                        # make calls to the LLM to get the next step
+                        llm_server_url = os.environ.get("LLM_SERVER_ENDPOINT", None)
+                        if not llm_server_url:
+                            llm_server_url = None
+                            print("LLM_SERVER_ENDPOINT not set, using None", flush=True)
+                        else:
+                            print(
+                                f"LLM_SERVER_ENDPOINT set to {llm_server_url}",
+                                flush=True,
+                            )
                         payload = {
                             "request_type": "create_plan",
                             "question": self.user_question,
@@ -155,13 +167,18 @@ class Executor:
                             "direct_parent_analysis": self.direct_parent_analysis,
                             "api_key": self.dfg_api_key,
                             "plan_id": self.analysis_id,
+                            "llm_server_url": llm_server_url,
+                            "model_name": os.environ.get("LLM_MODEL_NAME", None),
+                            "dev": self.dev,
+                            "temp": self.temp,
                         }
                         ans = await asyncio.to_thread(requests.post, url, json=payload)
 
-                    print(ans.json())
-
-                    ans = ans.json()["generated_step"]
-                    self.previous_responses.append(ans)
+                    try:
+                        ans = ans.json()["generated_step"]
+                        self.previous_responses.append(ans)
+                    except Exception as e:
+                        raise Exception(f"{ans.text}")
 
                     match = re.search("(?:```yaml)([\s\S]*?)(?=```)", ans)
 
@@ -174,7 +191,7 @@ class Executor:
                 else:
                     step = self.predefined_steps.pop(0)
 
-                print(step)
+                print("step: ", step, flush=True)
 
                 # prepare to execute this step, by resolving the inputs
                 # if there's a global_dict.variable_name reference in step["inputs"], replace it with the value from global_dict
@@ -186,6 +203,8 @@ class Executor:
                 result, tool_input_metadata = await execute_tool(
                     step["tool_name"], resolved_inputs, self.global_dict
                 )
+
+                print("result: ", result, flush=True)
 
                 step["error_message"] = result.get("error_message")
 
@@ -202,7 +221,9 @@ class Executor:
                 ):
                     # TODO: REDO THIS STEP
                     print(
-                        "Length of outputs_storage_keys and outputs don't match. Force matching the length."
+                        Fore.RED
+                        + "Length of outputs_storage_keys and outputs don't match. Force matching the length."
+                        + Style.RESET_ALL
                     )
                     # if outputs_storage_keys < outputs, append the difference with output_idx
                     if len(step.get("outputs_storage_keys")) < len(
@@ -228,12 +249,6 @@ class Executor:
                 # if the outputs of this step match any of the previous steps, either exactly or:
                 # , means that we should overwrite the previous step with this step. this was probably a "correction" of some of the previous step.
                 is_correction = False
-
-                from pathlib import Path
-                home_path = Path.home()
-                log_path = home_path / "defog_logs.txt"
-                with open(log_path, "a") as f:
-                    f.write(f"Added to yield list\n")
 
                 yield_val = YieldList([step])
 

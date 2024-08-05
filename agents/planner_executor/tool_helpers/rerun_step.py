@@ -1,42 +1,43 @@
 import inspect
 from agents.planner_executor.tool_helpers.all_tools import *
-from db_utils import store_tool_run, get_tool_run, update_tool_run_data
+from tool_code_utilities import fetch_query_into_df
+from db_utils import (
+    store_tool_run,
+    get_tool_run,
+    update_particular_step,
+    update_tool_run_data,
+)
+from colorama import Style
 from agents.planner_executor.execute_tool import execute_tool
 
 # from gcs_utils import file_exists_in_gcs, get_file_from_gcs
 from agents.planner_executor.tool_helpers.core_functions import *
 from utils import (
+    filter_function_inputs,
     log_str,
     log_msg,
     log_error,
     log_success,
+    wrap_in_async,
 )
-from agents.planner_executor.tool_helpers.core_functions import *
+
 import pandas as pd
 import traceback
 import os
 
 
-from pathlib import Path
-home_dir = Path.home()
-
-# see if we have a custom report assets directory
-if not os.path.exists(home_dir / "defog_report_assets"):
-    # create one
-    os.mkdir(home_dir / "defog_report_assets")
-
-report_assets_dir = home_dir / "defog_report_assets"
-
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
 
 
 # rerun_step_and_dependents function runs the step, the step's parents if needed AND all descendants that depend on this step recursively
 # if descendants of children depend on the children, it will keep going down the graph and re running
 # we will first re run the step with the given tool_run_id. re running all parents in the process
 # then we will run all steps that use the output of that step
-async def rerun_step_and_dependents(analysis_id, tool_run_id, steps, global_dict={}):
+async def rerun_step_and_dependents(
+    dfg_api_key, analysis_id, tool_run_id, steps, global_dict={}
+):
     async for err, parent_step_id, new_data in rerun_step_and_parents(
-        analysis_id, tool_run_id, steps, global_dict=global_dict
+        dfg_api_key, analysis_id, tool_run_id, steps, global_dict=global_dict
     ):
         yield err, parent_step_id, new_data
 
@@ -62,9 +63,10 @@ async def rerun_step_and_dependents(analysis_id, tool_run_id, steps, global_dict
                             dependent_run_id,
                             new_data,
                         ) in rerun_step_and_dependents(
-                            analysis_id,
-                            step["tool_run_id"],
-                            steps,
+                            dfg_api_key=dfg_api_key,
+                            analysis_id=analysis_id,
+                            tool_run_id=step["tool_run_id"],
+                            steps=steps,
                             global_dict=global_dict,
                         ):
                             yield err, dependent_run_id, new_data
@@ -72,7 +74,9 @@ async def rerun_step_and_dependents(analysis_id, tool_run_id, steps, global_dict
                     break
 
 
-async def rerun_step_and_parents(analysis_id, tool_run_id, steps, global_dict={}):
+async def rerun_step_and_parents(
+    dfg_api_key, analysis_id, tool_run_id, steps, global_dict={}
+):
     # function that will rerun a step
     # find the step with the tool_run_id and it's inputs
     # then it will need to iterate through all inputs of the step then for each input:
@@ -152,6 +156,7 @@ async def rerun_step_and_parents(analysis_id, tool_run_id, steps, global_dict={}
                             parent_step_id,
                             new_data,
                         ) in rerun_step_and_parents(
+                            dfg_api_key,
                             analysis_id,
                             s["tool_run_id"],
                             steps,
@@ -165,7 +170,7 @@ async def rerun_step_and_parents(analysis_id, tool_run_id, steps, global_dict={}
     err, tool_run_data = await get_tool_run(tool_run_id)
 
     if err:
-        log_error(f"Error getting tool run data: {err}")
+        log_error(f"Error getting tool run data: {err}{Style.RESET_ALL}")
 
         yield err, tool_run_id, None
 
@@ -216,42 +221,67 @@ async def rerun_step_and_parents(analysis_id, tool_run_id, steps, global_dict={}
 
             err = None
             result = None
+            final_sql_query = None
             new_data = None
             try:
-                result = await fetch_query_into_df(tool_run_details["sql"])
+                result, final_sql_query = await fetch_query_into_df(
+                    api_key=dfg_api_key,
+                    sql_query=tool_run_details["sql"],
+                    temp=global_dict.get("temp", False),
+                )
             except Exception as e:
                 err = str(e)
                 result = None
-                # traceback.print_exc()
+                traceback.print_exc()
 
             if not err:
                 # save the result in the global_dict
                 global_dict[output_nm] = result
                 global_dict[output_nm].df_name = output_nm
-                # first remove any errors
-                update_res = await update_tool_run_data(
-                    analysis_id,
-                    tool_run_id,
-                    "error_message",
-                    None,
-                )
-                # update with this new result
-                update_res = await update_tool_run_data(
-                    analysis_id,
-                    tool_run_id,
-                    "outputs",
-                    {output_nm: {"data": result}},
-                )
-                if not update_res["success"]:
-                    log_error(
-                        f"Error saving the outputs of re running step: {update_res['error_message']}"
+
+                try:
+                    # first remove any errors
+                    update_res = await update_tool_run_data(
+                        analysis_id,
+                        tool_run_id,
+                        "error_message",
+                        None,
                     )
 
-                    new_data = None
-                    err = update_res["error_message"]
-                else:
+                    if not update_res["success"]:
+                        raise ValueError(
+                            f"Error saving the outputs of re running step: {update_res['error_message']}"
+                        )
+
+                    # update with this new result
+                    update_res = await update_tool_run_data(
+                        analysis_id,
+                        tool_run_id,
+                        "outputs",
+                        {output_nm: {"data": result}},
+                    )
+                    if not update_res["success"]:
+                        raise ValueError(
+                            f"Error saving the outputs of re running step: {update_res['error_message']}"
+                        )
+
+                    # also update the final sql query
+                    update_res = await update_tool_run_data(
+                        analysis_id, tool_run_id, "sql", final_sql_query
+                    )
+
+                    if not update_res["success"]:
+                        raise ValueError(
+                            f"Error saving the outputs of re running step: {update_res['error_message']}"
+                        )
                     new_data = update_res["tool_run_data"]
                     log_success(f"Successfully saved output of running tool:" + f_nm)
+
+                except Exception as e:
+                    log_error(e)
+                    traceback.print_exc()
+                    new_data = None
+                    err = str(e)
             else:
                 # if there was an error, store new tool result with that error
                 update_res = await update_tool_run_data(
@@ -288,6 +318,16 @@ async def rerun_step_and_parents(analysis_id, tool_run_id, steps, global_dict={}
                 # first remove any errors from target_step
                 target_step["error_message"] = None
                 store_res = await store_tool_run(analysis_id, target_step, result)
+
+                # now also update model_generated_inputs so that if we change sql later,
+                # we don't end up comparing the question to the *first* question that was generated
+                # but instead, compare to this new one
+                await update_particular_step(
+                    analysis_id=analysis_id,
+                    tool_run_id=tool_run_id,
+                    prop="model_generated_inputs",
+                    new_val=resolved_inputs,
+                )
 
                 if not store_res["success"]:
                     log_error(f"Error re running step: {store_res['error_message']}")
@@ -327,11 +367,21 @@ async def rerun_step_and_parents(analysis_id, tool_run_id, steps, global_dict={}
         result = tool_run_details
         new_data = None
         try:
+            print("Resoluved inputs", resolved_inputs.keys(), flush=True)
+
+            resolved_inputs["global_dict"] = global_dict
+
             exec(code_str, globals())
-            print(resolved_inputs)
-            exec_result = await globals()[f_nm](
-                **resolved_inputs, global_dict=global_dict
-            )
+
+            fn = globals()[f_nm]
+
+            filtered_inputs, _ = filter_function_inputs(fn, resolved_inputs)
+
+            fn = wrap_in_async(fn)
+
+            print("Filtered inputs", filtered_inputs.keys(), flush=True)
+
+            exec_result = await fn(**filtered_inputs)
             err = exec_result.get("error_message")
             result.update(exec_result)
 
@@ -345,7 +395,7 @@ async def rerun_step_and_parents(analysis_id, tool_run_id, steps, global_dict={}
         except Exception as e:
             err = str(e)
             result["error_message"] = err
-            # traceback.print_exc()
+            traceback.print_exc()
 
         store_res = await store_tool_run(analysis_id, target_step, result)
 

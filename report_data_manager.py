@@ -7,12 +7,13 @@ from db_utils import (
     get_multiple_reports,
     get_report_data,
     update_report_data,
-    get_api_key,
 )
 from agents.main_agent import (
     execute,
     get_clarification,
 )
+
+from functools import partial
 
 request_types = [
     "clarify",
@@ -28,10 +29,12 @@ import os
 
 
 class ReportDataManager:
-    def __init__(self, user_question, report_id):
+    def __init__(self, dfg_api_key, user_question, report_id, dev=False, temp=False):
         self.report_id = report_id
         self.report_data = None
-        self.api_key = get_api_key()
+        self.api_key = dfg_api_key
+        self.dev = dev
+        self.temp = temp
         self.user_question = user_question
         self.invalid = False
         self.similar_plans = []
@@ -79,12 +82,24 @@ class ReportDataManager:
             self.report_id = report_data.get("report_id")
 
             self.agents = {
-                "clarify": get_clarification,
-                "gen_steps": execute,
+                "clarify": partial(
+                    get_clarification,
+                    dfg_api_key=self.api_key,
+                    dev=self.dev,
+                    temp=self.temp,
+                ),
+                "gen_steps": partial(
+                    execute, dfg_api_key=self.api_key, dev=self.dev, temp=self.temp
+                ),
             }
 
             self.post_processes = {
-                "clarify": Clarifier.clarifier_post_process,
+                "clarify": partial(
+                    Clarifier.clarifier_post_process,
+                    dfg_api_key=self.api_key,
+                    dev=self.dev,
+                    temp=self.temp,
+                ),
             }
 
     # have to call this separately because update_report_data is an async function
@@ -205,6 +220,6 @@ class ReportDataManager:
             err = str(e)
             print(e)
             result = None
-            # traceback.print_exc()
+            traceback.print_exc()
         finally:
             return err, result

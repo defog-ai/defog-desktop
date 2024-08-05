@@ -1,10 +1,18 @@
+from datetime import datetime
 import inspect
 import re
 import json
 import traceback
-from defog import Defog
+from colorama import Fore, Style
 
+from openai import AsyncOpenAI
 import httpx
+
+import os
+
+openai_api_key = os.environ["OPENAI_API_KEY"]
+
+openai = AsyncOpenAI(api_key=openai_api_key)
 
 
 # custom list class with a overwrite_key attribute
@@ -42,59 +50,6 @@ def fix_JSON(json_message=None):
     return result
 
 
-def get_table_metadata_nested_dict(api_key):
-    import requests
-
-    try:
-        r = requests.post(
-            "https://api.defog.ai/get_metadata", json={"api_key": api_key}
-        )
-
-        metadata = r.json()["table_metadata"]
-        return {"success": True, "metadata_dict": metadata}
-    except Exception as e:
-        print(e)
-        # traceback.print_exc()
-        return {
-            "success": False,
-            "error_message": "Error getting table metadata. Is your api key correct?",
-        }
-
-
-def get_table_metadata_as_sql_creates_from_json(metadata):
-    metadata_sql = ""
-    for table_name in metadata:
-        metadata_sql += f"CREATE TABLE {table_name} (\n"
-        for item in metadata[table_name]:
-            metadata_sql += f"\t{item['column_name']} {item['data_type']},"
-            if item["column_description"]:
-                metadata_sql += f" -- {item['column_description']}"
-            metadata_sql += "\n"
-
-        metadata_sql += ");\n\n"
-    return metadata_sql
-
-
-def get_table_metadata_as_sql_creates_from_api_key(api_key):
-    import requests
-
-    try:
-        r = requests.post(
-            "https://api.defog.ai/get_metadata", json={"api_key": api_key}
-        )
-
-        metadata = r.json()["table_metadata"]
-        metadata_sql = get_table_metadata_as_sql_creates_from_json(metadata)
-        return {"success": True, "metadata_sql": metadata_sql}
-    except Exception as e:
-        print(e)
-        # traceback.print_exc()
-        return {
-            "success": False,
-            "error_message": "Error getting table metadata. Is your api key correct?",
-        }
-
-
 def api_response(ran_successfully=False, **extra):
     """Returns a JSON object with the ran_successfully key and any extra keys passed in."""
     return {"ran_successfully": ran_successfully, **extra}
@@ -107,41 +62,36 @@ def missing_param_error(param_name):
     )
 
 
-def get_db_type():
-    defog = Defog()
-    return defog.db_type
-
-
 def success_str(msg=""):
-    return msg
+    return f"{Fore.GREEN}{Style.BRIGHT}{msg}{Style.RESET_ALL}"
 
 
 def error_str(msg=""):
-    return msg
+    return f"{Fore.RED}{Style.BRIGHT}{msg}{Style.RESET_ALL}"
 
 
 def log_str(msg=""):
-    return msg
+    return f"{Fore.BLUE}{Style.BRIGHT}{msg}{Style.RESET_ALL}"
 
 
 def warn_str(msg=""):
-    return msg
+    return f"{Fore.YELLOW}{Style.BRIGHT}{msg}{Style.RESET_ALL}"
 
 
 def log_success(msg=""):
-    print(msg)
+    print(f"{Fore.GREEN}{Style.BRIGHT}{msg}{Style.RESET_ALL}")
 
 
 def log_error(msg=""):
-    print(msg)
+    print(f"{Fore.RED}{Style.BRIGHT}{msg}{Style.RESET_ALL}")
 
 
 def log_msg(msg=""):
-    print(msg)
+    print(f"{Fore.BLUE}{Style.BRIGHT}{msg}{Style.RESET_ALL}")
 
 
 def log_warn(msg=""):
-    print(msg)
+    print(f"{Fore.YELLOW}{Style.BRIGHT}{msg}{Style.RESET_ALL}")
 
 
 simple_tool_types = {
@@ -182,41 +132,14 @@ def get_clean_plan(analysis_data):
                 "done",
                 "error_message",
             ]:
-                cleaned_item[key] = value
+                # if key is model_generated_inputs, just change it to inputs
+                if key == "model_generated_inputs":
+                    cleaned_item["inputs"] = value
+                else:
+                    cleaned_item[key] = value
         cleaned_plan.append(cleaned_item)
 
     return cleaned_plan
-
-
-async def execute_code(
-    code_snippets: list,  # list of code strings to execute
-    fn_name,  # function name to call
-    use_globals=False,  # whether to use globals as the sandbox
-):
-    """
-    Runs code string and returns output.
-    """
-    err = None
-    out = None
-    try:
-        sandbox = {}
-        if use_globals:
-            sandbox = globals()
-
-        for code in code_snippets:
-            exec(code, sandbox)
-
-        # check if test_tool is an async function
-        if inspect.iscoroutinefunction(sandbox[fn_name]):
-            out = await sandbox[fn_name]()
-        else:
-            out = sandbox[fn_name]()
-    except Exception as e:
-        out = None
-        err = str(e)
-        # traceback.print_exc()
-    finally:
-        return err, out
 
 
 def snake_case(s):
@@ -242,3 +165,40 @@ async def make_request(url, payload, verbose=False):
         if verbose:
             print(f"Response: {r.text}")
     return r
+
+
+def filter_function_inputs(fn, inputs):
+    """
+    Used to filter down a dict's keys to only the parameters that are required by a function
+    Creates a filtering function that can be run on a dict
+    Which will filter the dict's keys based on the return value (True or False)
+    of the filter function
+    If the function takes kwargs, we always return true from the function
+    Otherwise, we check if the key is in the function's parameters
+    """
+    # if a function takes kwargs, then we will
+    sig = inspect.signature(fn)
+    params = sig.parameters.values()
+    has_kwargs = any([True for p in params if p.kind == p.VAR_KEYWORD])
+    f = lambda _: True
+
+    if not has_kwargs:
+        param_names = [p.name for p in params]
+        f = lambda key: key in param_names
+
+    return {k: v for k, v in inputs.items() if f(k)}, f
+
+
+def wrap_in_async(fn):
+    """
+    If a function isn't async, wrap it in an async function for create_Task to work
+    """
+    wrapped_fn = fn
+    if not inspect.iscoroutinefunction(fn):
+
+        async def async_fn(**kwargs):
+            return fn(**kwargs)
+
+        wrapped_fn = async_fn
+
+    return wrapped_fn

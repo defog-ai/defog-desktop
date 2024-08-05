@@ -1,6 +1,11 @@
+import base64
 import datetime
+import inspect
+import json
 import os
+import trace
 from uuid import uuid4
+from colorama import Fore, Style
 import traceback
 
 from fastapi.responses import JSONResponse
@@ -8,12 +13,14 @@ import requests
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
 from agents.planner_executor.tool_helpers.rerun_step import rerun_step_and_dependents
 from agents.planner_executor.tool_helpers.core_functions import analyse_data
-from agents.planner_executor.tool_helpers.all_tools import tool_name_dict
 import pandas as pd
 from io import StringIO
-from utils import execute_code, get_clean_plan, get_db_type, log_msg, snake_case
+from tool_code_utilities import add_default_imports, fix_savefig_calls
+from utils import log_msg, snake_case
 import logging
-from db_utils import get_api_key
+from generic_utils import get_api_key_from_key_name
+from db_utils import execute_code, get_db_type_creds
+
 logging.basicConfig(level=logging.INFO)
 
 from connection_manager import ConnectionManager
@@ -36,6 +43,7 @@ from db_utils import (
     update_table_chart_data,
     get_table_data,
     get_all_analyses,
+    update_tool,
     update_tool_run_data,
     delete_doc,
     get_all_tools,
@@ -45,17 +53,8 @@ router = APIRouter()
 
 manager = ConnectionManager()
 
-llm_calls_url = os.environ.get("LLM_CALLS_URL", "https://api.defog.ai/agent_endpoint")
-
-from pathlib import Path
-home_dir = Path.home()
-# see if we have a custom report assets directory
-if not os.path.exists(home_dir / "defog_report_assets"):
-    # create one
-    os.mkdir(home_dir / "defog_report_assets")
-
-report_assets_dir = home_dir / "defog_report_assets"
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+llm_calls_url = os.environ["LLM_CALLS_URL"]
+report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
 
 
 @router.websocket("/docs")
@@ -101,12 +100,12 @@ async def doc_websocket_endpoint(websocket: WebSocket):
             await manager.send_personal_message(data, websocket)
     except WebSocketDisconnect as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # # traceback.print_exc()
+        # traceback.print_exc()
         manager.disconnect(websocket)
         await websocket.close()
     except Exception as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # # traceback.print_exc()
+        # traceback.print_exc()
         # other reasons for disconnect, like websocket being closed or a timeout
         manager.disconnect(websocket)
         await websocket.close()
@@ -120,6 +119,9 @@ async def add_to_recently_viewed_docs_endpoint(request: Request):
     try:
         data = await request.json()
         token = data.get("token")
+        key_name = data.get("key_name")
+        api_key = get_api_key_from_key_name(key_name)
+
         doc_id = data.get("doc_id")
 
         if token is None or type(token) != str:
@@ -128,17 +130,21 @@ async def add_to_recently_viewed_docs_endpoint(request: Request):
         if doc_id is None or type(doc_id) != str:
             return {"success": False, "error_message": "Invalid document id."}
 
-        await add_to_recently_viewed_docs(
+        err = await add_to_recently_viewed_docs(
             token=token,
             doc_id=doc_id,
+            api_key=api_key,
             timestamp=str(datetime.datetime.now()),
         )
+
+        if err:
+            raise Exception(err)
 
         return {"success": True}
     except Exception as e:
         logging.info("Error getting analyses: " + str(e))
-        # traceback.print_exc()
-        return {"success": False, "error_message": "Unable to parse your request."}
+        traceback.print_exc()
+        return {"success": False, "error_message": e}
 
 
 @router.post("/toggle_archive_status")
@@ -165,14 +171,21 @@ async def get_document(request: Request):
     If it doesn't exist, create one and return empty data.
     """
     data = await request.json()
+    key_name = data.get("key_name")
     doc_id = data.get("doc_id")
     token = data.get("token")
     col_name = data.get("col_name") or "doc_blocks"
+    api_key = get_api_key_from_key_name(key_name)
+
+    if api_key is None or type(api_key) != str:
+        return {"success": False, "error_message": "Invalid api key."}
 
     if doc_id is None or type(doc_id) != str:
         return {"success": False, "error_message": "Invalid document id."}
 
-    err, doc_data = await get_doc_data(doc_id, token, col_name)
+    err, doc_data = await get_doc_data(
+        api_key=api_key, doc_id=doc_id, token=token, col_name=col_name
+    )
 
     if err:
         return {"success": False, "error_message": err}
@@ -199,7 +212,7 @@ async def get_toolboxes_endpoint(request: Request):
         return {"success": True, "toolboxes": toolboxes}
     except Exception as e:
         logging.info("Error getting analyses: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": "Unable to parse your request."}
 
 
@@ -226,7 +239,7 @@ async def get_docs(request: Request):
         }
     except Exception as e:
         logging.info("Error getting analyses: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": "Unable to parse your request."}
 
 
@@ -235,15 +248,19 @@ async def get_analyses(request: Request):
     """
     Get all analysis of a user using the api key.
     """
+    params = await request.json()
+    key_name = params.get("key_name")
+    api_key = get_api_key_from_key_name(key_name)
+    print(api_key, flush=True)
     try:
-        err, analyses = await get_all_analyses()
+        err, analyses = await get_all_analyses(api_key=api_key)
         if err:
             return {"success": False, "error_message": err}
 
         return {"success": True, "analyses": analyses}
     except Exception as e:
         logging.info("Error getting analyses: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": "Unable to parse your request."}
 
 
@@ -285,12 +302,12 @@ async def update_table_chart(websocket: WebSocket):
 
     except WebSocketDisconnect as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # # traceback.print_exc()
+        # traceback.print_exc()
         manager.disconnect(websocket)
         await websocket.close()
     except Exception as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         # other reasons for disconnect, like websocket being closed or a timeout
         manager.disconnect(websocket)
         await websocket.close()
@@ -316,7 +333,7 @@ async def get_table_chart(request: Request):
         return {"success": True, "table_data": table_data}
     except Exception as e:
         logging.info("Error getting analyses: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": "Unable to parse your request."}
 
 
@@ -341,7 +358,7 @@ async def get_tool_run_endpoint(request: Request):
         return {"success": True, "tool_run_data": tool_run}
     except Exception as e:
         logging.info("Error getting analyses: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": "Unable to parse your request."}
 
 
@@ -372,23 +389,20 @@ async def edit_tool_run(websocket: WebSocket):
             )
             if not update_res["success"]:
                 logging.info(
-                    f"Error updating tool run: {update_res['error_message']}"
+                    f"{Fore.RED} {Style.Bright} Error updating tool run: {update_res['error_message']}{Style.RESET_ALL}"
                 )
 
     except WebSocketDisconnect as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # # traceback.print_exc()
+        # traceback.print_exc()
         manager.disconnect(websocket)
         await websocket.close()
     except Exception as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # # traceback.print_exc()
+        traceback.print_exc()
         # other reasons for disconnect, like websocket being closed or a timeout
         manager.disconnect(websocket)
-        try:
-            await websocket.close()
-        except:
-            pass
+        await websocket.close()
 
 
 @router.websocket("/step_rerun")
@@ -407,6 +421,9 @@ async def rerun_step(websocket: WebSocket):
             tool_run_id = data.get("tool_run_id")
             analysis_id = data.get("analysis_id")
             dev = data.get("dev", False)
+            key_name = data.get("key_name")
+            temp = data.get("temp")
+            api_key = get_api_key_from_key_name(key_name)
 
             if tool_run_id is None or type(tool_run_id) != str:
                 return {"success": False, "error_message": "Invalid tool run id."}
@@ -429,6 +446,8 @@ async def rerun_step(websocket: WebSocket):
                 "llm_calls_url": llm_calls_url,
                 "report_assets_dir": report_assets_dir,
                 "dev": dev,
+                "dfg_api_key": api_key,
+                "temp": temp,
             }
 
             if err:
@@ -452,7 +471,11 @@ async def rerun_step(websocket: WebSocket):
 
             logging.info([s["inputs"] for s in steps])
             async for err, reran_id, new_data in rerun_step_and_dependents(
-                analysis_id, tool_run_id, steps, global_dict=global_dict
+                dfg_api_key=api_key,
+                analysis_id=analysis_id,
+                tool_run_id=tool_run_id,
+                steps=steps,
+                global_dict=global_dict,
             ):
                 if new_data and type(new_data) == dict:
                     if reran_id:
@@ -467,9 +490,6 @@ async def rerun_step(websocket: WebSocket):
                             websocket,
                         )
                     elif new_data.get("pre_tool_run_message"):
-                        logging.info(
-                            f"Starting rerunning of step: {new_data.get('pre_tool_run_message')} with websocket: {websocket} in application_state: {websocket.application_state} and client_state: {websocket.client_state}"
-                        )
                         await manager.send_personal_message(
                             {
                                 "pre_tool_run_message": new_data.get(
@@ -493,18 +513,15 @@ async def rerun_step(websocket: WebSocket):
 
     except WebSocketDisconnect as e:
         logging.info("Disconnected. Error: " + str(e))
-        # # traceback.print_exc()
+        # traceback.print_exc()
         manager.disconnect(websocket)
         await websocket.close()
     except Exception as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # # traceback.print_exc()
+        traceback.print_exc()
         # other reasons for disconnect, like websocket being closed or a timeout
         manager.disconnect(websocket)
-        try:
-            await websocket.close()
-        except Exception as e:
-            pass
+        await websocket.close()
 
 
 # setup an analyse_data websocket endpoint
@@ -540,12 +557,12 @@ async def analyse_data_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # # traceback.print_exc()
+        # traceback.print_exc()
         manager.disconnect(websocket)
         await websocket.close()
     except Exception as e:
         # logging.info("Disconnected. Error: " +  str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         await manager.send_personal_message(
             {"success": False, "error_message": str(e)[:300]}, websocket
         )
@@ -571,14 +588,15 @@ async def create_new_step(request: Request):
         inputs = data.get("inputs")
         outputs_storage_keys = data.get("outputs_storage_keys")
 
+        err, tools = get_all_tools()
+
+        if err:
+            return {"success": False, "error_message": err}
+
         if analysis_id is None or type(analysis_id) != str:
             return {"success": False, "error_message": "Invalid analysis id."}
 
-        if (
-            tool_name is None
-            or type(tool_name) != str
-            or tool_name not in tool_name_dict
-        ):
+        if tool_name is None or type(tool_name) != str or tool_name not in tools:
             return {"success": False, "error_message": "Invalid tool name."}
 
         if parent_step is None or type(parent_step) != dict:
@@ -618,10 +636,6 @@ async def create_new_step(request: Request):
                     else "No steps found for analysis"
                 ),
             }
-
-        err, tools = get_all_tools()
-        if err:
-            return {"success": False, "error_message": err}
 
         tool = tools[tool_name]
 
@@ -668,7 +682,7 @@ async def create_new_step(request: Request):
 
     except Exception as e:
         logging.info("Error creating new step: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": str(e)[:300]}
     return
 
@@ -693,7 +707,7 @@ async def delete_doc_endpoint(request: Request):
         return {"success": True}
     except Exception as e:
         logging.info("Error deleting doc: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": str(e)[:300]}
 
 
@@ -708,6 +722,8 @@ async def download_csv(request: Request):
         tool_run_id = data.get("tool_run_id")
         output_storage_key = data.get("output_storage_key")
         analysis_id = data.get("analysis_id")
+        key_name = data.get("key_name")
+        api_key = get_api_key_from_key_name(key_name)
 
         if tool_run_id is None or type(tool_run_id) != str:
             return {"success": False, "error_message": "Invalid tool run id."}
@@ -736,6 +752,7 @@ async def download_csv(request: Request):
                 "user_question": analysis_data["user_question"],
                 "llm_calls_url": llm_calls_url,
                 "report_assets_dir": report_assets_dir,
+                "dfg_api_key": api_key,
             }
 
             if err:
@@ -748,7 +765,11 @@ async def download_csv(request: Request):
                 return {"success": False, "error_message": steps["error_message"]}
 
             async for err, reran_id, new_data in rerun_step_and_dependents(
-                analysis_id, tool_run_id, steps, global_dict=global_dict
+                dfg_api_key=api_key,
+                analysis_id=analysis_id,
+                tool_run_id=tool_run_id,
+                steps=steps,
+                global_dict=global_dict,
             ):
                 # don't need to yield unless there's an error
                 # if error, then bail
@@ -772,7 +793,7 @@ async def download_csv(request: Request):
 
     except Exception as e:
         logging.info("Error downloading csv: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": str(e)[:300]}
 
 
@@ -831,7 +852,7 @@ async def delete_steps(request: Request):
 
     except Exception as e:
         logging.info("Error deleting steps: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": str(e)[:300]}
 
 
@@ -868,7 +889,7 @@ async def delete_tool_endpoint(request: Request):
         return {"success": True}
     except Exception as e:
         logging.info("Error disabling tool: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": str(e)[:300]}
 
 
@@ -892,7 +913,7 @@ async def toggle_disable_tool_endpoint(request: Request):
         return {"success": True}
     except Exception as e:
         logging.info("Error disabling tool: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": str(e)[:300]}
 
 
@@ -911,6 +932,8 @@ async def add_tool_endpoint(request: Request):
         output_metadata = data.get("output_metadata")
         toolbox = data.get("toolbox")
         no_code = data.get("no_code", False)
+        key_name = data.get("key_name")
+        api_key = get_api_key_from_key_name(key_name)
 
         if (
             function_name is None
@@ -948,14 +971,15 @@ async def add_tool_endpoint(request: Request):
             return {"success": False, "error_message": "Invalid no code."}
 
         err = await add_tool(
-            tool_name,
-            function_name,
-            description,
-            code,
-            input_metadata,
-            output_metadata,
-            toolbox,
-            no_code,
+            api_key=api_key,
+            tool_name=tool_name,
+            function_name=function_name,
+            description=description,
+            code=code,
+            input_metadata=input_metadata,
+            output_metadata=output_metadata,
+            toolbox=toolbox,
+            no_code=no_code,
         )
 
         if err:
@@ -966,7 +990,7 @@ async def add_tool_endpoint(request: Request):
         return {"success": True}
     except Exception as e:
         logging.info("Error adding tool: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": str(e)[:300]}
 
 
@@ -984,10 +1008,16 @@ async def submit_feedback(request: Request):
         user_question = data.get("user_question")
         analysis_id = data.get("analysis_id")
         token = data.get("token")
-        db_type = get_db_type()
+        key_name = data.get("key_name")
+        api_key = get_api_key_from_key_name(key_name)
+        res = get_db_type_creds(api_key)
+        db_type = res[0]
 
         if analysis_id is None or type(analysis_id) != str:
             raise Exception("Invalid analysis id.")
+
+        if api_key is None or type(api_key) != str:
+            raise Exception("Invalid api key.")
 
         if user_question is None or type(user_question) != str:
             raise Exception("Invalid user question.")
@@ -996,135 +1026,23 @@ async def submit_feedback(request: Request):
 
         # store in the defog_plans_feedback table
         err, did_overwrite = await store_feedback(
-            user_question,
-            analysis_id,
-            is_correct,
-            comments,
-            db_type,
+            api_key=api_key,
+            user_question=user_question,
+            analysis_id=analysis_id,
+            is_correct=is_correct,
+            comments=comments,
+            db_type=db_type,
         )
 
         if err:
             raise Exception(err)
 
         return {"success": True, "did_overwrite": did_overwrite}
-
-        # cleaned_plan = get_clean_plan(analysis_data)
-        # generated_plan_yaml = yaml.dump(cleaned_plan)
-        # send the following to the defog server, and get feedback on how to improve it
-        # - user_question
-        # - comments
-        # - metadata
-        # - glossary
-        # - plan generated
-        # if not is_correct:
-        #     err, tools = get_all_tools()
-        #     tools = [
-        #         {
-        #             "function_name": tools[tool]["function_name"],
-        #             "description": tools[tool]["description"],
-        #             "input_metadata": tools[tool]["input_metadata"],
-        #             "output_metadata": tools[tool]["output_metadata"],
-        #         }
-        #         for tool in tools
-        #     ]
-
-        # tool_description_yaml = yaml.dump(tools)
-
-        # TODO: implement this on the defog server
-        # r = requests.post(
-        #     "https://api.defog.ai/reflect_on_agent_feedback",
-        #     json={
-        #         "question": user_question,
-        #         "comments": comments,
-        #         "plan_generated": generated_plan_yaml,
-        #         "api_key": DEFOG_API_KEY,
-        #         "tool_description": tool_description_yaml,
-        #     },
-        # )
-
-        # we will get back:
-        # - updated metadata
-        # - updated glossary
-        # - updated golden plan
-        # raw_response = r.json()["diagnosis"]
-
-        # # extract yaml from metadata
-        # initial_recommended_plan = (
-        #     raw_response.split("```yaml")[-1].split("```")[0].strip()
-        # )
-        # logging.info(initial_recommended_plan)
-        # new_analysis_id = str(uuid4())
-        # new_analysis_data = None
-        # try:
-        #     initial_recommended_plan = yaml.safe_load(initial_recommended_plan)
-        #     # give each tool a tool_run_id
-        #     # duplicate model_generated_inputs to inputs
-        #     for i, item in enumerate(initial_recommended_plan):
-        #         item["tool_run_id"] = str(uuid4())
-        #         item["inputs"] = item["model_generated_inputs"].copy()
-
-        #     # create a new analysis with these as steps
-        #     err, new_analysis_data = await initialise_report(
-        #         user_question,
-        #         token,
-        #         new_analysis_id,
-        #         {"gen_steps": [], "clarify": []},
-        #     )
-        #     if err:
-        #         raise Exception(err)
-
-        #     setup, post_process = await execute(
-        #         report_id=new_analysis_id,
-        #         user_question=user_question,
-        #         client_description=client_description,
-        #         toolboxes=[],
-        #         parent_analyses=[],
-        #         similar_plans=[],
-        #         predefined_steps=initial_recommended_plan,
-        #     )
-
-        #     if not setup.get("success"):
-        #         raise Exception(setup.get("error_message", ""))
-
-        #     final_executed_plan = []
-        #     # run the generator
-        #     if "generator" in setup:
-        #         g = setup["generator"]
-        #         async for step in g():
-        #             # step comes in as a list of 1 step
-        #             final_executed_plan += step
-        #             err = await update_report_data(
-        #                 new_analysis_id, "gen_steps", step
-        #             )
-        #             if err:
-        #                 raise Exception(err)
-
-        #     recommended_plan = final_executed_plan
-        # except Exception as e:
-        #     logging.info(e)
-        #     # traceback.print_exc()
-        #     recommended_plan = None
-        #     new_analysis_data = None
-
-        # if err is not None:
-        #     raise Exception(err)
-
-        # return {
-        #     "success": True,
-        #     "did_overwrite": did_overwrite,
-        #     "suggested_improvements": raw_response,
-        #     "recommended_plan": recommended_plan,
-        #     "new_analysis_id": new_analysis_id,
-        #     "new_analysis_data": new_analysis_data,
-        # }
-        # else:
-        #     return {"success": True, "did_overwrite": did_overwrite}
-
     except Exception as e:
         logging.info(str(e))
         error = str(e)[:300]
         logging.info(error)
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": error}
 
 
@@ -1142,7 +1060,7 @@ async def get_analysis_versions_endpoint(request: Request):
         pass
     except Exception as e:
         logging.info("Error getting analysis versions: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {
             "success": False,
             "error_message": "Unable to get versions: " + str(e[:300]),
@@ -1171,7 +1089,7 @@ async def update_dashboard_data_endpoint(request: Request):
         return {"success": True}
     except Exception as e:
         logging.info("Error adding analysis to dashboard: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {
             "success": False,
             "error_message": "Unable to add analysis to dashboard: " + str(e)[:300],
@@ -1186,6 +1104,8 @@ async def generate_tool_code_endpoint(request: Request):
         tool_description = data.get("tool_description")
         user_question = data.get("user_question")
         current_code = data.get("current_code")
+        key_name = data.get("key_name")
+        api_key = get_api_key_from_key_name(key_name)
 
         if not tool_name:
             raise Exception("Invalid parameters.")
@@ -1199,7 +1119,7 @@ async def generate_tool_code_endpoint(request: Request):
             "tool_description": tool_description,
             "user_question": user_question,
             "current_code": current_code,
-            "api_key": get_api_key(),
+            "api_key": api_key,
         }
 
         retries = 0
@@ -1270,14 +1190,14 @@ async def generate_tool_code_endpoint(request: Request):
             except Exception as e:
                 error = str(e)[:300]
                 logging.info("Error generating tool code: " + str(e))
-                # traceback.print_exc()
+                traceback.print_exc()
             finally:
                 if error:
                     payload = {
                         "request_type": "fix_tool_code",
                         "error": error,
-                        "messages": resp["messages"],
-                        "api_key": get_api_key(),
+                        "messages": None,
+                        "api_key": api_key,
                     }
                 retries += 1
 
@@ -1286,7 +1206,7 @@ async def generate_tool_code_endpoint(request: Request):
 
     except Exception as e:
         logging.info("Error generating tool code: " + str(e))
-        # traceback.print_exc()
+        traceback.print_exc()
         return {
             "success": False,
             "error_message": "Unable to generate tool code: " + str(e)[:300],

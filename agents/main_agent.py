@@ -6,10 +6,13 @@ import traceback
 # each of the agents can return a "postprocess" function
 # that will be run before the next stage and will process the incoming user input if any for the next stage
 async def get_clarification(
+    dfg_api_key="",
     user_question="",
     client_description="",
     parent_analyses=[],
     direct_parent_analysis=None,
+    dev=False,
+    temp=False,
     **kwargs,
 ):
     """
@@ -19,10 +22,13 @@ async def get_clarification(
     """
     try:
         clarifier = Clarifier(
-            user_question,
-            client_description,
-            parent_analyses,
-            direct_parent_analysis,
+            dfg_api_key=dfg_api_key,
+            user_question=user_question,
+            client_description=client_description,
+            parent_analyses=parent_analyses,
+            direct_parent_analysis=direct_parent_analysis,
+            dev=dev,
+            temp=temp,
         )
 
         (
@@ -37,7 +43,7 @@ async def get_clarification(
         }, post_process
     except Exception as e:
         err = e
-        # traceback.print_exc()
+        traceback.print_exc()
         return {
             "success": False,
             "error_message": "Error generating clarification questions.",
@@ -45,6 +51,7 @@ async def get_clarification(
 
 
 async def execute(
+    dfg_api_key="",
     report_id="",
     user_question="",
     client_description="",
@@ -56,6 +63,7 @@ async def execute(
     similar_plans=[],
     predefined_steps=None,
     dev=False,
+    temp=False,
     **kwargs,
 ):
     """
@@ -65,8 +73,10 @@ async def execute(
     This takes quite long as of now. Needs to be parallelised for the future.
     """
     print("Evaling approaches")
+    print("API Key: ", dfg_api_key)
 
     executor = Executor(
+        dfg_api_key=dfg_api_key,
         report_id=report_id,
         user_question=user_question,
         assignment_understanding=assignment_understanding,
@@ -76,6 +86,7 @@ async def execute(
         predefined_steps=predefined_steps,
         direct_parent_analysis=direct_parent_analysis,
         dev=dev,
+        temp=temp,
     )
     try:
         execute, post_process = await executor.execute()
@@ -87,5 +98,5 @@ async def execute(
 
     except Exception as e:
         err = e
-        # traceback.print_exc()
+        traceback.print_exc()
         return {"success": False, "error_message": "Error generating report."}, None

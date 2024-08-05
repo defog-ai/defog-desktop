@@ -6,7 +6,6 @@ import yaml
 import asyncio
 import requests
 import os
-from db_utils import get_api_key
 
 default_values_formatted = {
     "multi select": [],
@@ -21,7 +20,7 @@ default_values = {
     # "date range selector": 12,
 }
 
-llm_calls_url = os.environ.get("LLM_CALLS_URL", "https://api.defog.ai/agent_endpoint")
+llm_calls_url = os.environ["LLM_CALLS_URL"]
 
 
 def parse_q(q):
@@ -44,7 +43,7 @@ def parse_q(q):
         return j
     except Exception as e:
         # print(e)
-        # # traceback.print_exc()
+        # traceback.print_exc()
         return []
 
 
@@ -55,8 +54,11 @@ class Clarifier:
 
     def __init__(
         self,
+        dfg_api_key,
         user_question,
         client_description,
+        dev=False,
+        temp=False,
         parent_analyses=[],
         direct_parent_analysis=None,
     ):
@@ -64,9 +66,12 @@ class Clarifier:
         self.client_description = client_description
         self.parent_analyses = parent_analyses
         self.direct_parent_analysis = direct_parent_analysis
+        self.dfg_api_key = dfg_api_key
+        self.dev = dev
+        self.temp = temp
 
     @staticmethod
-    async def clarifier_post_process(self={}):
+    async def clarifier_post_process(self={}, dfg_api_key="", dev=False, temp=False):
         """
         This function is called right before the understander stage.
         It takes in the user's answers to the clarification questions
@@ -85,7 +90,7 @@ class Clarifier:
             payload = {
                 "request_type": "turn_into_statement",
                 "clarification_questions": clarification_questions,
-                "api_key": get_api_key(),
+                "api_key": dfg_api_key,
             }
             r = await asyncio.to_thread(requests.post, url, json=payload)
             statements = r.json()["statements"]
@@ -110,8 +115,11 @@ class Clarifier:
                     if i["user_question"] is not None and i["user_question"] != ""
                 ],
                 "direct_parent_analysis": self.direct_parent_analysis,
-                "api_key": get_api_key(),
+                "api_key": self.dfg_api_key,
+                "dev": self.dev,
+                "temp": self.temp,
             }
+            print(payload)
             r = await asyncio.to_thread(requests.post, url, json=payload)
             res = r.json()
             print(res, flush=True)
@@ -127,7 +135,7 @@ class Clarifier:
                         print(e)
                         pass
             except Exception as e:
-                # traceback.print_exc()
+                traceback.print_exc()
                 print(e)
                 yield None
 

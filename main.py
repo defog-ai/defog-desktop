@@ -1,20 +1,17 @@
 import os
-import threading
-
-from create_sqlite_tables import create_sqlite_tables
-create_sqlite_tables()
-
-from add_tools_to_db import add_tools
-add_tools()
-
+import traceback
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import FileResponse
 from starlette.websockets import WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from utils import make_request
+from connection_manager import ConnectionManager
+from report_data_manager import ReportDataManager
+from agents.planner_executor.execute_tool import execute_tool
+from agents.planner_executor.planner_executor_agent_rest import RESTExecutor
+import doc_endpoints
 from uuid import uuid4
-import uvicorn
-import webbrowser
+from utils import make_request
+
 from db_utils import (
     get_all_reports,
     get_report_data,
@@ -22,22 +19,22 @@ from db_utils import (
     update_report_data,
     store_tool_run,
     validate_user,
-    get_api_key,
 )
-from connection_manager import ConnectionManager
-from report_data_manager import ReportDataManager
-from agents.planner_executor.execute_tool import execute_tool
-
-import integration_routes, query_routes, auth_routes, doc_endpoints
+from generic_utils import get_api_key_from_key_name
+import integration_routes, query_routes, admin_routes, auth_routes, readiness_routes, csv_routes, feedback_routes, slack_routes
 
 manager = ConnectionManager()
 
 app = FastAPI()
 app.include_router(integration_routes.router)
 app.include_router(query_routes.router)
+app.include_router(admin_routes.router)
 app.include_router(auth_routes.router)
+app.include_router(readiness_routes.router)
 app.include_router(doc_endpoints.router)
-
+app.include_router(csv_routes.router)
+app.include_router(feedback_routes.router)
+app.include_router(slack_routes.router)
 
 origins = ["*"]
 app.add_middleware(
@@ -49,35 +46,8 @@ app.add_middleware(
 )
 
 request_types = ["clarify", "understand", "gen_approaches", "gen_steps", "gen_report"]
+report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
 
-from pathlib import Path
-home_dir = Path.home()
-
-# see if we have a custom report assets directory
-if not os.path.exists(home_dir / "defog_report_assets"):
-    # create one
-    os.mkdir(home_dir / "defog_report_assets")
-
-report_assets_dir = home_dir / "defog_report_assets"
-
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
-
-from fastapi.staticfiles import StaticFiles
-import sys
-
-try:
-    # PyInstaller creates a temp folder and stores path in _MEIPASS
-    base_path = sys._MEIPASS
-except Exception:
-    base_path = os.path.abspath(".")
-    print(base_path)
-    one_level_up = os.path.abspath(os.path.join(base_path, ".."))
-    if os.path.exists(os.path.join(one_level_up, "Content/Resources")):
-        base_path = os.path.join(one_level_up, "Content/Resources")
-
-directory = os.path.join(base_path, "out")
-print(directory)
-app.mount("/static", StaticFiles(directory=directory, html=True), name="static")
 
 @app.get("/ping")
 async def root():
@@ -90,10 +60,10 @@ edit_request_types_and_prop_names = {
 }
 
 
-async def get_classification(question, debug=False):
+async def get_classification(question, api_key, debug=False):
     r = await make_request(
-        url=f"{os.environ.get('DEFOG_BASE_URL', 'https://api.defog.ai')}/classify_question",
-        payload={"question": question, "api_key": get_api_key()},
+        url=f"{os.environ['DEFOG_BASE_URL']}/classify_question",
+        payload={"question": question, "api_key": api_key},
     )
     if r.status_code == 200:
         return r.json()
@@ -129,20 +99,25 @@ async def edit_report(request: Request):
         return {"success": True}
     except Exception as e:
         print(e)
+        traceback.print_exc()
         err = str(e)
         return {"success": False, "error_message": "An error occurred"}
 
 
 @app.post("/get_reports")
 async def all_reports(request: Request):
+    params = await request.json()
+    key_name = params.get("key_name")
+    api_key = get_api_key_from_key_name(key_name)
     try:
-        err, reports = get_all_reports()
+        err, reports = get_all_reports(api_key=api_key)
         if err is not None:
             return {"success": False, "error_message": err}
 
         return {"success": True, "reports": reports}
     except Exception as e:
         print(e)
+        traceback.print_exc()
         return {"success": False, "error_message": "Incorrect request"}
 
 
@@ -163,6 +138,7 @@ async def one_report(request: Request):
         return {"success": True, "report_data": report_data}
     except Exception as e:
         print(e)
+        traceback.print_exc()
         return {"success": False, "error_message": "Incorrect request"}
 
 
@@ -173,10 +149,17 @@ async def create_report(request: Request):
         params = await request.json()
         token = params.get("token")
 
+        key_name = params.get("key_name")
+        api_key = get_api_key_from_key_name(key_name)
+
         print("create_report", params)
 
         err, report_data = await initialise_report(
-            "", token, params.get("custom_id"), params.get("other_data")
+            user_question="",
+            token=token,
+            api_key=api_key,
+            custom_id=params.get("custom_id"),
+            other_data=params.get("other_data"),
         )
 
         if err is not None:
@@ -205,6 +188,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                     continue
 
+                key_name = data.get("key_name")
+                api_key = get_api_key_from_key_name(key_name)
+
                 # find request type
                 request_type = data.get("request_type")
                 if (
@@ -224,17 +210,24 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 report_id = data.get("report_id")
                 token = data.get("token")
+                sql_only = data.get("sql_only")
+
                 if validate_user(token) is False:
                     await websocket.send_json(
                         {"success": False, "error_message": "Invalid token"}
                     )
                     continue
                 dev = data.get("dev")
+                temp = data.get("temp")
 
                 # start a report data manager
                 # this fetches currently existing report data for this report
                 report_data_manager = ReportDataManager(
-                    data["user_question"], report_id
+                    dfg_api_key=api_key,
+                    user_question=data["user_question"],
+                    report_id=report_id,
+                    dev=dev,
+                    temp=temp,
                 )
 
                 await report_data_manager.async_init()
@@ -255,13 +248,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "sqlcoder" in data["user_question"]:
                     print("sqlcoder word found in question")
                     classification = {"prediction": "sqlcoder"}
-
-                elif "agent" in data["user_question"]:
+                elif sql_only:
+                    print("sql_only flag passed")
+                    classification = {"prediction": "sqlcoder"}
+                else:
                     print("agent word found in question")
                     classification = {"prediction": "agent"}
-                else:
-                    # check if the user question needs agents, or just sqlcoder is fine
-                    classification = await get_classification(data["user_question"])
+                # else:
+                #     # check if the user question needs agents, or just sqlcoder is fine
+                #     classification = await get_classification(
+                #         question=data["user_question"], api_key=api_key
+                #     )
 
                 print(classification, flush=True)
                 if classification["prediction"] == "sqlcoder":
@@ -284,7 +281,13 @@ async def websocket_endpoint(websocket: WebSocket):
                             "question": data["user_question"],
                         }
                         result, tool_input_metadata = await execute_tool(
-                            "data_fetcher_and_aggregator", inputs, {"dev": dev}
+                            function_name="data_fetcher_and_aggregator",
+                            tool_function_inputs=inputs,
+                            global_dict={
+                                "dfg_api_key": api_key,
+                                "dev": dev,
+                                "temp": temp,
+                            },
                         )
                         tool_run_id = str(uuid4())
                         step = {
@@ -344,6 +347,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         db_creds=data.get("db_creds"),
                         toolboxes=toolboxes,
                         dev=dev,
+                        temp=temp,
                     )
 
                     # if the agent output is a generator, run it
@@ -395,6 +399,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                     replace=request_type == "gen_report",
                                 )
                         except Exception as e:
+                            traceback.print_exc()
                             print(e)
                             await websocket.send_json(
                                 {
@@ -410,6 +415,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_json(resp)
 
             except Exception as e:
+                traceback.print_exc()
                 print(e)
                 await websocket.send(
                     {
@@ -420,11 +426,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
     except WebSocketDisconnect as e:
         # print("Disconnected. Error: ", e)
+        # traceback.print_exc()
         manager.disconnect(websocket)
         await websocket.close()
     except Exception as e:
         # print("Disconnected. Error: ", e)
-        # # traceback.print_exc()
+        # traceback.print_exc()
         # other reasons for disconnect, like websocket being closed or a timeout
         manager.disconnect(websocket)
         await websocket.close()
@@ -436,6 +443,7 @@ async def get_assets(path: str):
         return FileResponse(os.path.join(report_assets_dir, path))
     except Exception as e:
         print(e)
+        traceback.print_exc()
         return {"success": False, "error_message": "Error getting assets"}
 
 
@@ -448,7 +456,19 @@ def read_root():
 def health_check():
     return {"status": "ok"}
 
-if __name__ == "__main__":
-    # open the browser after a 1 second delay
-    threading.Timer(1, lambda: webbrowser.open("http://localhost:33364/static/index.html")).start()
-    uvicorn.run(app, host="0.0.0.0", port=33364)
+
+@app.post("/plan_and_execute")
+async def plan_and_execute(request: Request):
+    data = await request.json()
+    question = data.get("question")
+    dev = data.get("dev")
+    api_key = data.get("api_key")
+    assignment_understanding = data.get("assignment_understanding", "")
+    executor = RESTExecutor(
+        dfg_api_key=api_key,
+        user_question=question,
+        assignment_understanding=assignment_understanding,
+        dev=dev,
+    )
+    steps, success = await executor.execute()
+    return {"steps": steps, "success": success}

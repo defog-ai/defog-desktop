@@ -1,45 +1,42 @@
+import hashlib
 from db_utils import engine, Users
 from sqlalchemy import (
     select,
     update,
-    insert
 )
-import asyncio
-from generic_utils import make_request
 
-async def login_user(username, password):
-    # sent a request to the server to check if the user exists
-    # if the user exists, then add their username, api_key, hashed_password to the database
-    # that's it!
-    r = await make_request("https://api.defog.ai/login", json={"username": username, "password": password})
-    if r["status"] == "success":
-        hashed_password = r["hashed_password"]
-        with engine.begin() as conn:
-            # check if user exists
-            user = conn.execute(select(Users).where(Users.username == username)).fetchone()
-            if not user:
-                conn.execute(
-                    insert(Users).values(username=username, hashed_password=hashed_password, user_type="admin")
-                )
-            else:
-                conn.execute(
-                    update(Users)
-                    .where(Users.username == username)
-                    .values(hashed_password=hashed_password, user_type="admin")
-                )
+SALT = "TOMMARVOLORIDDLE"
+
+
+def login_user(username, password):
+    hashed_password = hashlib.sha256((username + SALT + password).encode()).hexdigest()
+    with engine.begin() as conn:
+        user = conn.execute(
+            select(Users).where(Users.hashed_password == hashed_password)
+        ).fetchone()
+
+    if user:
+        return {"status": "success", "user_type": user[0], "token": hashed_password}
     else:
-        return {"status": "error", "error": "Invalid username or password"}
-    
-    # now make a request to the server to get the api key
-    r = await make_request("https://api.defog.ai/get_token", json={"username": username}, headers={"x-hashed-password": hashed_password})
-    api_key = r["token"]
+        return {
+            "status": "unauthorized",
+        }
+
+
+def reset_password(username, new_password):
+    hashed_password = hashlib.sha256(
+        (username + SALT + new_password).encode()
+    ).hexdigest()
     with engine.begin() as conn:
         conn.execute(
             update(Users)
             .where(Users.username == username)
-            .values(token=api_key)
+            .values(hashed_password=hashed_password)
         )
-    return {"status": "success", "token": hashed_password, "user_type": "admin"}
+
+
+def get_hashed_password(username, password):
+    return hashlib.sha256((username + SALT + password).encode()).hexdigest()
 
 
 def validate_user_email(email):

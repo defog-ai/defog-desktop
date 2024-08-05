@@ -2,7 +2,13 @@ import re
 import pandas as pd
 import traceback
 import inspect
-from utils import SqlExecutionError, error_str, warn_str
+from utils import (
+    SqlExecutionError,
+    error_str,
+    warn_str,
+    filter_function_inputs,
+    wrap_in_async,
+)
 from db_utils import get_all_tools
 import asyncio
 from tool_code_utilities import default_top_level_imports
@@ -102,14 +108,22 @@ async def execute_tool(function_name, tool_function_inputs, global_dict={}):
 
             exec(code, globals())
             fn = globals()[function_name]
-
-            task = asyncio.create_task(
-                fn(**tool_function_inputs, global_dict=global_dict)
+            tool_function_inputs["global_dict"] = tool_function_inputs.get(
+                "global_dict", {}
             )
+
+            tool_function_inputs["global_dict"].update(global_dict)
+
+            filtered_inputs, _ = filter_function_inputs(fn, tool_function_inputs)
+
+            wrapped_fn = wrap_in_async(fn)
+
+            task = asyncio.create_task(wrapped_fn(**filtered_inputs))
             try:
                 # expand tool inputs
                 # if it takes more than 120 seconds, then timeout
                 result = await asyncio.wait_for(task, timeout=120)
+                print("\n\nresult", result)
             except asyncio.TimeoutError:
                 print(error_str(f"Error for tool {function_name}: TimeoutError"))
                 result = {
@@ -121,7 +135,7 @@ async def execute_tool(function_name, tool_function_inputs, global_dict={}):
                     # Wait for the task cancellation to complete, catching any cancellation exceptions
                     await task
                 except asyncio.CancelledError:
-                    print("Task was successfully cancelled upon timeout")
+                    print("\n\nTask was successfully cancelled upon timeout")
 
             # if keyerror, then error string will not have "key error" in it but just the name of the key
             except KeyError as e:
@@ -130,22 +144,22 @@ async def execute_tool(function_name, tool_function_inputs, global_dict={}):
                         f"Error for tool {function_name}: KeyError, key not found {e}"
                     )
                 )
-                # traceback.print_exc()
+                traceback.print_exc()
                 result = {
                     "error_message": f"KeyError: key not found {e}. This might be due to missing columns in the generated data from earlier. You might need to run data fetcher again to make sure the required columns is in the data."
                 }
             except IndexError as e:
                 print(error_str(f"Error for tool {function_name}: IndexError: {e}"))
-                # traceback.print_exc()
+                traceback.print_exc()
                 result = {
                     "error_message": f"IndexError: index not found {e}. This might be due to empty dataframes from columns in the generated data from earlier. You might need to run data fetcher again to make sure the query is correct."
                 }
             except SqlExecutionError as e:
-                print("HAD SQL ERROR\n", str(e), flush=True)
+                print("\n\nHAD SQL ERROR\n", str(e), flush=True)
                 result = {"sql": e.sql, "error_message": str(e)}
             except Exception as e:
                 print(error_str(f"Error for tool {function_name}: {e}"))
-                # traceback.print_exc()
+                traceback.print_exc()
                 result = {"error_message": str(e)[:300]}
             finally:
                 result["code_str"] = tool["code"]

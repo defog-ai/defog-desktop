@@ -1,9 +1,9 @@
-# defog-desktop
+# Agents GCP
 
-This implements a version of defog (complete with agents!) that runs completely on your desktop, and not not require any other dependencies.
+This directory contains the source code for the agents deployment.
 
-- uses `sqlite` as a database
-- does not have matplotlib based plotting or user management tools built in, for convenience
-- supports agents
+## Building
 
-To use it, just run install requirements with `pip install -r requirements.txt`, the run `python main.py` and you'll be good to go!
+Note that we explicitly took out `defog` from requirements.txt because we wanted to track that separately from the rest of the docker commands and speed up the build process. You would need to run `pip install defog` if you're building this server locally, or want to pin the version of defog that you're using.
+
+This also means that if you do update defog-python, you would need to update `dockerfile.agents-python-server` to run pip install on the right version after uploading the new package to PyPi. This is to ensure that the built container has the right (and latest) version of defog-python in it.
