@@ -12,6 +12,7 @@ numpy
 pandas
 pandasql
 psycopg2-binary
+python-dotenv
 pyyaml
 redshift_connector
 requests
