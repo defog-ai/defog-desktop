@@ -1,5 +1,4 @@
 from typing import Dict, List
-import tiktoken
 from datetime import date
 import pandas as pd
 import base64
@@ -7,21 +6,6 @@ import os
 
 # these are needed for the exec_code function
 import pandas as pd
-
-from openai import AsyncOpenAI
-
-# get OPENAI_API_KEY from env
-
-openai = None
-
-if (
-    os.environ.get("OPENAI_API_KEY") is None
-    or os.environ.get("OPENAI_API_KEY") == "None"
-    or os.environ.get("OPENAI_API_KEY") == ""
-):
-    print("OPENAI_API_KEY not found in env")
-else:
-    openai = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 from pathlib import Path
 
@@ -64,24 +48,6 @@ def safe_sql(query):
     return True
 
 
-def estimate_tokens_left(messages: List[Dict], model: str) -> int:
-    """
-    Returns an estimate of the number of tokens left for generation based on the
-    messages generated so far and the model used.
-    """
-    encoding = tiktoken.encoding_for_model(model)
-    total_tokens = 0
-    for msg in messages:
-        num_tokens = len(encoding.encode(msg["content"]))
-        total_tokens += num_tokens
-    if model == "gpt-3.5-turbo":
-        return 4000 - total_tokens
-    elif "gpt-4" in model:
-        return 8000 - total_tokens
-    else:
-        raise ValueError(f"Unsupported model {model}")
-
-
 # resolves an input to a tool
 # by replacing global_dict references to the actual variable values
 def resolve_input(inp, global_dict):
@@ -118,77 +84,5 @@ async def analyse_data(
     """
     Generate a short summary of the results for the given qn.
     """
-    if not openai:
-        yield {"success": False, "model_analysis": "NONE"}
-        return
-
-    if data is None:
-        yield {"success": False, "model_analysis": "No data found"}
-        return
-
-    if data.size > 50 and image_path is None:
-        yield {"success": False, "model_analysis": "NONE"}
-        return
-
-    if question is None or question == "":
-        yield {"success": False, "model_analysis": "No question provided"}
-        return
-
-    if image_path:
-        base64_image = encode_image(image_path)
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"An image was generated to answer this question: `{question}`. Please interpret the results of this image for me. Do not repeat the data in the image verbatim. Instead, focus on the key insights and takeaways. Assume that your audience is a non-technical stakeholder who is interested in high level insights but do not want the exact numbers in the image to be repeated.",
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{base64_image}",
-                            "detail": "low",
-                        },
-                    },
-                ],
-            },
-        ]
-    else:
-        df_csv = data.to_csv(float_format="%.3f", header=True)
-        user_analysis_prompt = f"""Generate a short summary of the results for the given qn: `{question}`\n\nand results:
-    {df_csv}\n\n```"""
-        analysis_prompt = f"""Here is the brief summary of how the results answer the given qn:\n\n```"""
-        # get comma separated list of col names
-        col_names = ",".join(data.columns)
-
-        messages = [
-            {
-                "role": "assistant",
-                "content": f"User has the following columns available to them:\n\n"
-                + col_names
-                + "\n\n",
-            },
-            {"role": "user", "content": user_analysis_prompt},
-            {
-                "role": "assistant",
-                "content": analysis_prompt,
-            },
-        ]
-
-    completion = await openai.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        temperature=0,
-        seed=42,
-        stream=True,
-        max_tokens=400,
-    )
-
-    async for chunk in completion:
-        ct = chunk.choices[0]
-
-        if ct.finish_reason == "stop":
-            return
-
-        yield {"success": True, "model_analysis": ct.delta.content}
+    yield {"success": False, "model_analysis": "NONE"}
+    return

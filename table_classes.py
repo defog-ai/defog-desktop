@@ -6,7 +6,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import JSONB
-from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
 
@@ -96,19 +95,3 @@ class Users(Base):
     is_premium = Column(Boolean)
     created_at = Column(TIMESTAMP)
     is_verified = Column(Boolean)
-
-
-class Feedback(Base):
-    __tablename__ = "defog_plans_feedback"
-    api_key = Column(Text, primary_key=True)
-    username = Column(Text, primary_key=True)
-    user_question = Column(Text, primary_key=True)
-    embedding = Column(Vector)
-    comments = Column(JSONB)
-    is_correct = Column(Boolean, nullable=False)
-    analysis_id = Column(Text, primary_key=True)
-    # metadata_ because  Attribute name 'metadata' is reserved when using the Declarative API.
-    metadata_ = Column("metadata", Text, nullable=False)
-    client_description = Column(Text)
-    glossary = Column(Text)
-    db_type = Column(Text, nullable=False)
