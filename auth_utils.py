@@ -4,6 +4,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from fastapi.responses import JSONResponse
 
 SALT = "WITHPEPPER"
 
@@ -18,9 +19,10 @@ def login_user(username, password):
     if user:
         return {"status": "success", "user_type": user[0], "token": hashed_password}
     else:
-        return {
-            "status": "unauthorized",
-        }
+        return JSONResponse(
+            status_code=401,
+            content={"error": "unauthorized"},
+        )
 
 
 def reset_password(username, new_password):

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from auth_utils import login_user, reset_password
 from db_utils import validate_user
+from fastapi.responses import JSONResponse
 
 INTERNAL_API_KEY = "DUMMY_KEY"
 
@@ -28,7 +29,10 @@ async def reset_password(request: Request):
     new_password = params.get("password", None)
     token = params.get("token", None)
     if not validate_user(token, user_type="admin"):
-        return {"error": "unauthorized"}
+        return JSONResponse(
+            status_code=401,
+            content={"error": "unauthorized"},
+        )
     if not username:
         return {"error": "no user id provided"}
     if not new_password:
