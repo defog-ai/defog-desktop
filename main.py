@@ -1,4 +1,15 @@
+# Load environment variables
+from dotenv import load_dotenv
 import os
+
+load_dotenv("config.env")
+
+DEFOG_API_KEY = os.environ.get("DEFOG_API_KEY")
+if DEFOG_API_KEY is None or DEFOG_API_KEY == "" or DEFOG_API_KEY == "YOUR_API_KEY":
+    raise Exception(
+        f"Your DEFOG_API_KEY is currently invalid. Please set DEFOG_API_KEY to your valid API key in your config.env file."
+    )
+
 import traceback
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import FileResponse
@@ -11,6 +22,8 @@ from agents.planner_executor.planner_executor_agent_rest import RESTExecutor
 import doc_endpoints
 from uuid import uuid4
 from utils import make_request
+from dotenv import load_dotenv
+
 
 from db_utils import (
     get_all_reports,
@@ -55,6 +68,18 @@ if not os.path.exists(home_dir / "defog_report_assets"):
 
 report_assets_dir = home_dir / "defog_report_assets"
 report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+
+from fastapi.staticfiles import StaticFiles
+
+base_path = os.path.abspath(".")
+print(base_path)
+one_level_up = os.path.abspath(os.path.join(base_path, ".."))
+if os.path.exists(os.path.join(one_level_up, "Content/Resources")):
+    base_path = os.path.join(one_level_up, "Content/Resources")
+
+directory = os.path.join(base_path, "out")
+print(directory)
+app.mount("/static", StaticFiles(directory=directory, html=True), name="static")
 
 
 @app.get("/ping")
@@ -480,3 +505,15 @@ async def plan_and_execute(request: Request):
     )
     steps, success = await executor.execute()
     return {"steps": steps, "success": success}
+
+
+import threading
+import webbrowser
+import uvicorn
+
+if __name__ == "__main__":
+    # open the browser after a 1 second delay
+    threading.Timer(
+        1, lambda: webbrowser.open("http://localhost:33364/static/index.html")
+    ).start()
+    uvicorn.run(app, host="0.0.0.0", port=33364)

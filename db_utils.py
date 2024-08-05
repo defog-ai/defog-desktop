@@ -37,15 +37,12 @@ Base = automap_base()
 # reflect the tables
 Base.prepare(autoload_with=engine)
 
-Docs = Base.classes.defog_docs
-RecentlyViewedDocs = Base.classes.defog_recently_viewed_docs
 Reports = Base.classes.defog_reports
 TableCharts = Base.classes.defog_table_charts
 ToolRuns = Base.classes.defog_tool_runs
 Toolboxes = Base.classes.defog_toolboxes
 Tools = Base.classes.defog_tools
 Users = Base.classes.defog_users
-Feedback = Base.classes.defog_plans_feedback
 DbCreds = Base.classes.defog_db_creds
 
 
