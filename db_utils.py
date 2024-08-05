@@ -16,26 +16,21 @@ import asyncio
 from utils import warn_str, YieldList, make_request
 import os
 
-report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
+from pathlib import Path
 
-if os.environ.get("INTERNAL_DB") == "sqlite":
-    print("using sqlite as our internal db")
-    # if using sqlite
-    connection_uri = "sqlite:///defog_local.db"
-    engine = create_engine(connection_uri, connect_args={"timeout": 3})
-else:
-    db_creds = {
-        "user": os.environ["DBUSER"],
-        "password": os.environ["DBPASSWORD"],
-        "host": os.environ["DBHOST"],
-        "port": os.environ["DBPORT"],
-        "database": os.environ["DATABASE"],
-    }
+home_dir = Path.home()
+# see if we have a custom report assets directory
+if not os.path.exists(home_dir / "defog_report_assets"):
+    # create one
+    os.mkdir(home_dir / "defog_report_assets")
 
-    # if using postgres
-    print("using postgres as our internal db")
-    connection_uri = f"postgresql://{db_creds['user']}:{db_creds['password']}@{db_creds['host']}:{db_creds['port']}/{db_creds['database']}"
-    engine = create_engine(connection_uri)
+report_assets_dir = home_dir / "defog_report_assets"
+report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+
+print("using sqlite as our internal db")
+# if using sqlite
+connection_uri = "sqlite:///defog_local.db"
+engine = create_engine(connection_uri, connect_args={"timeout": 3})
 
 Base = automap_base()
 
@@ -1238,7 +1233,7 @@ async def store_feedback(
 
     asyncio.create_task(
         make_request(
-            f"{os.environ['DEFOG_BASE_URL']}/update_agent_feedback",
+            f"{os.environ.get("DEFOG_BASE_URL", "https://api.defog.ai")}/update_agent_feedback",
             {
                 "api_key": api_key,
                 "user_question": user_question,
@@ -1344,7 +1339,7 @@ async def add_tool(
         print("Adding tool to the defog API server", tool_name)
         asyncio.create_task(
             make_request(
-                url=f"{os.environ['DEFOG_BASE_URL']}/update_tool",
+                url=f"{os.environ.get("DEFOG_BASE_URL", "https://api.defog.ai")}/update_tool",
                 payload={
                     "api_key": api_key,
                     "tool_name": tool_name,

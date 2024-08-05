@@ -5,14 +5,9 @@ import json
 import traceback
 from colorama import Fore, Style
 
-from openai import AsyncOpenAI
 import httpx
 
 import os
-
-openai_api_key = os.environ["OPENAI_API_KEY"]
-
-openai = AsyncOpenAI(api_key=openai_api_key)
 
 
 # custom list class with a overwrite_key attribute

@@ -20,7 +20,7 @@ default_values = {
     # "date range selector": 12,
 }
 
-llm_calls_url = os.environ["LLM_CALLS_URL"]
+llm_calls_url = os.environ.get("LLM_CALLS_URL", "https://api.defog.ai/agent_endpoint")
 
 
 def parse_q(q):

@@ -12,7 +12,16 @@ import pandas as pd
 import os
 from db_utils import get_db_type_creds
 
-report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
+from pathlib import Path
+
+home_dir = Path.home()
+# see if we have a custom report assets directory
+if not os.path.exists(home_dir / "defog_report_assets"):
+    # create one
+    os.mkdir(home_dir / "defog_report_assets")
+
+report_assets_dir = home_dir / "defog_report_assets"
+report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
 
 
 import matplotlib.pyplot as plt

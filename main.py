@@ -21,7 +21,7 @@ from db_utils import (
     validate_user,
 )
 from generic_utils import get_api_key_from_key_name
-import integration_routes, query_routes, admin_routes, auth_routes, readiness_routes, csv_routes, feedback_routes, slack_routes
+import integration_routes, query_routes, admin_routes, auth_routes, readiness_routes, csv_routes, feedback_routes
 
 manager = ConnectionManager()
 
@@ -34,7 +34,6 @@ app.include_router(readiness_routes.router)
 app.include_router(doc_endpoints.router)
 app.include_router(csv_routes.router)
 app.include_router(feedback_routes.router)
-app.include_router(slack_routes.router)
 
 origins = ["*"]
 app.add_middleware(
@@ -46,7 +45,16 @@ app.add_middleware(
 )
 
 request_types = ["clarify", "understand", "gen_approaches", "gen_steps", "gen_report"]
-report_assets_dir = os.environ["REPORT_ASSETS_DIR"]
+from pathlib import Path
+
+home_dir = Path.home()
+# see if we have a custom report assets directory
+if not os.path.exists(home_dir / "defog_report_assets"):
+    # create one
+    os.mkdir(home_dir / "defog_report_assets")
+
+report_assets_dir = home_dir / "defog_report_assets"
+report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
 
 
 @app.get("/ping")
