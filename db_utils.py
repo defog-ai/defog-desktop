@@ -1,3 +1,4 @@
+import inspect
 import json
 import traceback
 import datetime
@@ -117,25 +118,38 @@ def validate_user(token, user_type=None, get_username=False):
         return False
 
 
-async def execute_code(codestr):
+async def execute_code(
+    code_snippets: list,  # list of code strings to execute
+    fn_name=None,  # function name to call
+    use_globals=False,  # whether to use globals as the sandbox
+):
     """
-    Executes the code in a string. Returns the error or results.
+    Runs code string and returns output.
     """
     err = None
-    analysis = None
-    full_data = None
+    out = None
     try:
         # add some imports to the codestr
-        exec(codestr, globals())
-        analysis, full_data = await globals()["exec_code"]()
-        full_data.code_str = codestr
+        sandbox = {}
+        if use_globals:
+            sandbox = globals()
+
+        for code in code_snippets:
+            exec(code, sandbox)
+
+        if fn_name:
+            # check if test_tool is an async function
+            if inspect.iscoroutinefunction(sandbox[fn_name]):
+                out = await sandbox[fn_name]()
+            else:
+                out = sandbox[fn_name]()
     except Exception as e:
+        out = None
+        err = str(e)
+        sandbox = None
         traceback.print_exc()
-        err = e
-        analysis = None
-        full_data = None
     finally:
-        return err, analysis, full_data
+        return err, out, sandbox
 
 
 async def initialise_report(
@@ -432,168 +446,6 @@ def get_all_reports(api_key: str):
         return err, reports
 
 
-async def add_to_recently_viewed_docs(token, doc_id, timestamp, api_key):
-    username = validate_user(token, get_username=True)
-    if not username:
-        return "Invalid token."
-    try:
-        print("Adding to recently viewed docs for user: ", username)
-        with engine.begin() as conn:
-            # add to recently accessed documents for this username
-            # check if it exists
-            row = conn.execute(
-                select(RecentlyViewedDocs)
-                .where(RecentlyViewedDocs.username == username)
-                .where(RecentlyViewedDocs.api_key == api_key)
-            ).fetchone()
-
-            if row:
-                print("Adding to recently viewed docs for user: ", username)
-                # get the recent_docs array
-                recent_docs = row.recent_docs or []
-                # recent_docs is an array of arrays
-                # each item is a [doc_id, timestamp]
-                # check if doc_id is already in the array
-                # if it is, update the timestamp
-                # if not, add it to the array
-                found = False
-                for i, doc in enumerate(recent_docs):
-                    if doc[0] == doc_id:
-                        recent_docs[i][1] = timestamp
-                        found = True
-                        break
-
-                if not found:
-                    recent_docs.append([doc_id, timestamp])
-
-                # update the row
-                conn.execute(
-                    update(RecentlyViewedDocs)
-                    .where(RecentlyViewedDocs.username == username)
-                    .where(RecentlyViewedDocs.api_key == api_key)
-                    .values(recent_docs=recent_docs)
-                )
-            else:
-                # create a new row
-                conn.execute(
-                    insert(RecentlyViewedDocs).values(
-                        {
-                            "api_key": api_key,
-                            "username": username,
-                            "recent_docs": [[doc_id, timestamp]],
-                        }
-                    )
-                )
-    except Exception as e:
-        print(e)
-        # traceback.print_exc()
-        print("Could not add to recently viewed docs\n")
-
-
-async def get_doc_data(api_key, doc_id, token, col_name="doc_blocks"):
-    username = validate_user(token, get_username=True)
-    if not username:
-        return "Invalid token.", None
-    err = None
-    timestamp = str(datetime.datetime.now())
-    doc_data = None
-
-    try:
-        """Find the document with the id in the Docs table.
-        If it doesn't exist, create one and return empty data."""
-        with engine.begin() as conn:
-            # check if document exists
-            row = conn.execute(select(Docs).where(Docs.doc_id == doc_id)).fetchone()
-
-            if row:
-                # document exists
-                print("Found document with id: ", doc_id)
-                doc_data = {
-                    "doc_id": row.doc_id,
-                    col_name: getattr(row, col_name),
-                }
-
-            else:
-                # create a new document
-                print("Creating new document with id: ", doc_id)
-                doc_data = {
-                    "doc_id": doc_id,
-                    "doc_blocks": None,
-                    "doc_xml": None,
-                    "doc_uint8": None,
-                    "username": username,
-                }
-
-                conn.execute(
-                    insert(Docs).values(
-                        {
-                            "doc_id": doc_id,
-                            "api_key": api_key,
-                            "doc_blocks": None,
-                            "doc_xml": None,
-                            "doc_uint8": None,
-                            "timestamp": timestamp,
-                            "username": username,
-                        }
-                    )
-                )
-
-    except Exception as e:
-        traceback.print_exc()
-        print(e)
-        err = "Could not create a new report."
-        doc_data = None
-    finally:
-        return err, doc_data
-
-
-async def delete_doc(doc_id):
-    err = None
-    try:
-        with engine.begin() as conn:
-            result = conn.execute(delete(Docs).where(Docs.doc_id == doc_id))
-
-            if result.rowcount > 0:
-                print("Deleted doc with id: ", doc_id)
-            else:
-                err = "Doc not found."
-                raise ValueError(err)
-    except Exception as e:
-        err = str(e)
-        print(e)
-        traceback.print_exc()
-    finally:
-        return err
-
-
-async def update_doc_data(doc_id, col_names=[], new_data={}):
-    err = None
-    if len(col_names) == 0 and len(new_data) == 0:
-        return None
-
-    try:
-        with engine.begin() as conn:
-            # first get the data
-            row = conn.execute(
-                select(*[Docs.__table__.columns[c] for c in col_names]).where(
-                    Docs.doc_id == doc_id
-                )
-            ).fetchone()
-
-            if row:
-                print("Updating document with id: ", doc_id, "column: ", col_names)
-                conn.execute(update(Docs).where(Docs.doc_id == doc_id).values(new_data))
-            else:
-                err = "Doc not found."
-                raise ValueError(err)
-    except Exception as e:
-        err = str(e)
-        print(e)
-        traceback.print_exc()
-    finally:
-        return err
-
-
 def create_table_chart(table_data):
     err = None
     if table_data is None or table_data.get("table_id") is None:
@@ -713,79 +565,6 @@ async def get_table_data(table_id):
         table_data = None
     finally:
         return err, table_data
-
-
-async def get_all_docs(token):
-    username = validate_user(token, get_username=True)
-    if not username:
-        return "Invalid token.", None, None
-    # get reports from the reports table
-    err = None
-    own_docs = []
-    recently_viewed_docs = []
-    try:
-        """Get docs for a user from the defog_docs table"""
-        with engine.begin() as conn:
-            # first get the data
-            rows = conn.execute(
-                select(
-                    Docs.__table__.columns["doc_id"],
-                    Docs.__table__.columns["doc_title"],
-                    Docs.__table__.columns["doc_uint8"],
-                    Docs.__table__.columns["timestamp"],
-                    Docs.__table__.columns["archived"],
-                ).where(Docs.username == username)
-            ).fetchall()
-            if len(rows) > 0:
-                for row in rows:
-                    doc = row._mapping
-                    own_docs.append(doc)
-
-        # get recently viewed docs
-        with engine.begin() as conn:
-            # first get the data
-            # merge recentlyvieweddocs with docs to get the user_question too
-            # create an array of objects with doc_id, doc_title, timestamp, user_question
-            rows = conn.execute(
-                select(
-                    RecentlyViewedDocs.__table__.columns["recent_docs"],
-                ).where(RecentlyViewedDocs.username == username)
-            ).fetchall()
-
-            if len(rows) > 0:
-                for row in rows:
-                    doc = row._mapping
-                    for recent_doc in doc["recent_docs"]:
-                        # get the doc data from the docs table
-                        # this will skip docs that have been deleted because of the where clause
-                        match = conn.execute(
-                            select(
-                                Docs.__table__.columns["doc_id"],
-                                Docs.__table__.columns["doc_title"],
-                                Docs.__table__.columns["timestamp"],
-                                Docs.__table__.columns["username"],
-                            ).where(Docs.doc_id == recent_doc[0])
-                        ).fetchone()
-
-                        if match:
-                            recently_viewed_docs.append(
-                                {
-                                    "doc_id": match.doc_id,
-                                    "doc_title": match.doc_title,
-                                    # also return user who created this document
-                                    "username": match.username,
-                                    "timestamp": recent_doc[1],
-                                }
-                            )
-
-    except Exception as e:
-        print(e)
-        traceback.print_exc()
-        err = "Something went wrong while fetching your documents. Please contact us."
-        own_docs = None
-        recently_viewed_docs = None
-    finally:
-        return err, own_docs, recently_viewed_docs
 
 
 async def get_all_analyses(api_key: str):
