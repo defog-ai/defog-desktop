@@ -1233,7 +1233,7 @@ async def store_feedback(
 
     asyncio.create_task(
         make_request(
-            f"{os.environ.get("DEFOG_BASE_URL", "https://api.defog.ai")}/update_agent_feedback",
+            f"{os.environ.get('DEFOG_BASE_URL', 'https://api.defog.ai')}/update_agent_feedback",
             {
                 "api_key": api_key,
                 "user_question": user_question,
@@ -1339,7 +1339,7 @@ async def add_tool(
         print("Adding tool to the defog API server", tool_name)
         asyncio.create_task(
             make_request(
-                url=f"{os.environ.get("DEFOG_BASE_URL", "https://api.defog.ai")}/update_tool",
+                url=f"{os.environ.get('DEFOG_BASE_URL', 'https://api.defog.ai')}/update_tool",
                 payload={
                     "api_key": api_key,
                     "tool_name": tool_name,
