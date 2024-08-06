@@ -223,9 +223,6 @@ async def generate_metadata(request: Request):
             if "public" not in schemas:
                 schemas.append("public")
 
-    print(schemas)
-    print(tables)
-
     if schemas != ["public"] and defog.db_type == "postgres":
         table_metadata = await asyncio.to_thread(
             defog.generate_postgres_schema,
@@ -315,7 +312,11 @@ async def update_metadata(request: Request):
             "dev": dev,
         },
     )
-
+    if "detail" in r:
+        return JSONResponse(
+            status_code=409,
+            content={"error": r["detail"]},
+        )
     return r
 
 
