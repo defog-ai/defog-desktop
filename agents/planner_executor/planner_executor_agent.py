@@ -549,6 +549,7 @@ async def generate_single_step(
     toolboxes=[],
     dev=False,
     temp=False,
+    assignment_understanding="",
     # NOTE: we will remove this feature of "parent/nested/follow-on" analysis.
     # Keeping this here for now, but will remove it once we reach a stable point.
     # parent_analyses=[],
@@ -634,6 +635,7 @@ async def generate_single_step(
         "dev": dev,
         "temp": temp,
         "parent_questions": [],
+        "assignment_understanding": assignment_understanding,
         # NOTE: disabled for now. See note above.
         # "parent_questions": [p["user_question"] for p in parent_analyses],
         # "similar_plans": similar_plans[:2],
