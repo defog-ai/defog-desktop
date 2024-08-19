@@ -29,7 +29,10 @@ async def query(request: Request):
     if not validate_user(token):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     print(

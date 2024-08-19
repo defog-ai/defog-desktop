@@ -20,9 +20,10 @@ if not os.path.exists(home_dir / "defog_report_assets"):
     # create one
     os.mkdir(home_dir / "defog_report_assets")
 
-report_assets_dir = home_dir / "defog_report_assets"
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
-
+analysis_assets_dir = home_dir / "defog_report_assets"
+analysis_assets_dir = os.environ.get(
+    "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
+)
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -73,9 +74,18 @@ async def fetch_query_into_df(
             "password": "postgres",
         }
 
+    # make sure not unsafe
+    if not safe_sql(sql_query):
+        raise ValueError("Unsafe SQL Query")
+
     colnames, data, new_sql_query = await asyncio.to_thread(
         execute_query, sql_query, api_key, db_type, db_creds, retries=2, temp=temp
     )
+
+    # again, make sure new query that was run is safe
+    # make sure not unsafe
+    if not safe_sql(new_sql_query):
+        raise ValueError("Unsafe SQL Query")
 
     df = pd.DataFrame(data, columns=colnames)
 
@@ -164,11 +174,11 @@ def add_default_imports(code):
 
 def fix_savefig_calls(code):
     """
-    Fixes the savefig calls in the code by changing the path and always appending report_assets_dir variable to the path.
+    Fixes the savefig calls in the code by changing the path and always appending analysis_assets_dir variable to the path.
     """
     # check both for double and single quote
-    code = code.replace('savefig("', f'savefig({report_assets_dir} + "')
-    code = code.replace("savefig('", f"savefig({report_assets_dir} + '")
+    code = code.replace('savefig("', f'savefig({analysis_assets_dir} + "')
+    code = code.replace("savefig('", f"savefig({analysis_assets_dir} + '")
     # remove jic we got two slashes
     code = code.replace("//", "/")
     return code

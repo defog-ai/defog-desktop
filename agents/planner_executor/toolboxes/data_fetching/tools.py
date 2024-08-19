@@ -4,6 +4,7 @@ import pandas as pd
 async def data_fetcher_and_aggregator(
     question: str,
     global_dict: dict = {},
+    previous_context: list = [],
     **kwargs,
 ):
     """
@@ -28,6 +29,7 @@ async def data_fetcher_and_aggregator(
     temp = global_dict.get("temp", False)
     print(f"Dev: {dev}")
     print(f"Global dict currently has keys: {list(global_dict.keys())}")
+    print(f"Previous context: {previous_context}", flush=True)
 
     # send the data to the Defog, and get a response from it
     defog = Defog(api_key=api_key, db_type=db_type, db_creds=db_creds)
@@ -37,9 +39,15 @@ async def data_fetcher_and_aggregator(
     )
     # make async request to the url, using the appropriate library
     try:
-        res = await asyncio.to_thread(defog.get_query, question, dev=dev, temp=temp)
+        res = await asyncio.to_thread(
+            defog.get_query,
+            question=question,
+            previous_context=previous_context,
+            dev=dev,
+            temp=temp,
+        )
         query = res["query_generated"]
-        print(query)
+        print(query, flush=True)
     except:
         return {
             "error_message": "There was an error in generating the query. Please try again."

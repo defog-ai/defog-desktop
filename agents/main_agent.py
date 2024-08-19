@@ -1,5 +1,4 @@
 from agents.clarifier.clarifier_agent import Clarifier
-from agents.planner_executor.planner_executor_agent import Executor
 import traceback
 
 
@@ -48,55 +47,3 @@ async def get_clarification(
             "success": False,
             "error_message": "Error generating clarification questions.",
         }, None
-
-
-async def execute(
-    dfg_api_key="",
-    report_id="",
-    user_question="",
-    client_description="",
-    assignment_understanding="",
-    glossary="",
-    toolboxes=[],
-    parent_analyses=[],
-    direct_parent_analysis=None,
-    similar_plans=[],
-    predefined_steps=None,
-    dev=False,
-    temp=False,
-    **kwargs,
-):
-    """
-    This function is called after the user submits the approaches.
-    It creates an executor object and calls the execute function on it.
-    This function returns a generator that yields the report sections, intro and conclusion.
-    This takes quite long as of now. Needs to be parallelised for the future.
-    """
-    print("Evaling approaches")
-    print("API Key: ", dfg_api_key)
-
-    executor = Executor(
-        dfg_api_key=dfg_api_key,
-        report_id=report_id,
-        user_question=user_question,
-        assignment_understanding=assignment_understanding,
-        toolboxes=toolboxes,
-        parent_analyses=parent_analyses,
-        similar_plans=similar_plans,
-        predefined_steps=predefined_steps,
-        direct_parent_analysis=direct_parent_analysis,
-        dev=dev,
-        temp=temp,
-    )
-    try:
-        execute, post_process = await executor.execute()
-        return {
-            "success": True,
-            "generator": execute,
-            "prop_name": "steps",
-        }, post_process
-
-    except Exception as e:
-        err = e
-        traceback.print_exc()
-        return {"success": False, "error_message": "Error generating report."}, None

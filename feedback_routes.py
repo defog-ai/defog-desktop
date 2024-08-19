@@ -9,6 +9,7 @@ from db_utils import validate_user
 import os
 import pandas as pd
 from fastapi.responses import JSONResponse
+from datetime import datetime
 
 router = APIRouter()
 
@@ -24,7 +25,10 @@ async def feedback(request: Request):
     if not validate_user(token):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
     api_key = get_api_key_from_key_name(key_name)
     feedback = params.get("feedback")  # "good" or "Bad"
@@ -55,14 +59,16 @@ async def feedback(request: Request):
 
 @router.post("/get_feedback")
 async def get_feedback(request: Request):
-    print("get_feedback was hit")
     """Responds by fetching the feedback users have given in the past."""
     params = await request.json()
     token = params.get("token")
     if not validate_user(token):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
     key_name = params.get("key_name")
     api_key = get_api_key_from_key_name(key_name)
@@ -77,6 +83,10 @@ async def get_feedback(request: Request):
         data[idx][3] = format_sql(item[3])
 
     df = pd.DataFrame(data, columns=res["columns"])
+    # keep the most recent feedback for each question, query pair
+    df = df.sort_values(by="created_at", ascending=False).drop_duplicates(
+        subset=["question", "query_generated"]
+    )
     question_id_text = (
         df[df.question_id.notnull()].set_index("question_id")["question"].to_dict()
     )
@@ -107,7 +117,10 @@ async def get_instructions_recommendation(request: Request):
     if not validate_user(token):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
     key_name = params.get("key_name")
     api_key = get_api_key_from_key_name(key_name)

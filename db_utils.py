@@ -1,5 +1,6 @@
 import inspect
 import json
+import logging
 import traceback
 import datetime
 import uuid
@@ -25,8 +26,11 @@ if not os.path.exists(home_dir / "defog_report_assets"):
     # create one
     os.mkdir(home_dir / "defog_report_assets")
 
-report_assets_dir = home_dir / "defog_report_assets"
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+analysis_assets_dir = home_dir / "defog_report_assets"
+analysis_assets_dir = os.environ.get(
+    "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
+)
+
 
 print("using sqlite as our internal db")
 # if using sqlite
@@ -38,12 +42,13 @@ Base = automap_base()
 # reflect the tables
 Base.prepare(autoload_with=engine)
 
-Reports = Base.classes.defog_reports
+Analyses = Base.classes.defog_analyses
 TableCharts = Base.classes.defog_table_charts
 ToolRuns = Base.classes.defog_tool_runs
 Toolboxes = Base.classes.defog_toolboxes
 Tools = Base.classes.defog_tools
 Users = Base.classes.defog_users
+Feedback = Base.classes.defog_plans_feedback
 DbCreds = Base.classes.defog_db_creds
 
 
@@ -129,7 +134,6 @@ async def execute_code(
     err = None
     out = None
     try:
-        # add some imports to the codestr
         sandbox = {}
         if use_globals:
             sandbox = globals()
@@ -152,7 +156,7 @@ async def execute_code(
         return err, out, sandbox
 
 
-async def initialise_report(
+async def initialise_analysis(
     user_question, token, api_key, custom_id=None, other_data={}
 ):
     username = validate_user(token, get_username=True)
@@ -161,28 +165,28 @@ async def initialise_report(
 
     err = None
     timestamp = str(datetime.datetime.now())
-    new_report_data = None
+    new_analysis_data = None
 
     try:
-        """Create a new report in the defog_reports table"""
+        """Create a new analyis in the defog_analyses table"""
         with engine.begin() as conn:
             if not custom_id or custom_id == "":
-                report_id = str(uuid.uuid4())
+                analysis_id = str(uuid.uuid4())
             else:
-                report_id = custom_id
-            print("Creating new report with uuid: ", report_id)
-            new_report_data = {
+                analysis_id = custom_id
+            print("Creating new analyis with uuid: ", analysis_id)
+            new_analysis_data = {
                 "user_question": user_question,
                 "timestamp": timestamp,
-                "report_id": report_id,
+                "analysis_id": analysis_id,
                 "api_key": api_key,
                 "username": username,
             }
             if other_data is not None and type(other_data) is dict:
-                new_report_data.update(other_data)
+                new_analysis_data.update(other_data)
 
-            conn.execute(insert(Reports).values(new_report_data))
-            # if other data has parent_analyses, insert report_id into the follow_up_analyses column, which is an array, of all the parent analyses
+            conn.execute(insert(Analyses).values(new_analysis_data))
+            # if other data has parent_analyses, insert analysis_id into the follow_up_analyses column, which is an array, of all the parent analyses
             if (
                 other_data is not None
                 and type(other_data) is dict
@@ -191,7 +195,9 @@ async def initialise_report(
                 for parent_analysis_id in other_data.get("parent_analyses"):
                     # get the parent analysis
                     parent_analysis = conn.execute(
-                        select(Reports).where(Reports.report_id == parent_analysis_id)
+                        select(Analyses).where(
+                            Analyses.analysis_id == parent_analysis_id
+                        )
                     ).fetchone()
                     if parent_analysis is not None:
                         parent_analysis = parent_analysis._mapping
@@ -199,12 +205,12 @@ async def initialise_report(
                         follow_up_analyses = (
                             parent_analysis.get("follow_up_analyses") or []
                         )
-                        # add the report_id to the array
-                        follow_up_analyses.append(report_id)
+                        # add the analysis_id to the array
+                        follow_up_analyses.append(analysis_id)
                         # update the row
                         conn.execute(
-                            update(Reports)
-                            .where(Reports.report_id == parent_analysis_id)
+                            update(Analyses)
+                            .where(Analyses.analysis_id == parent_analysis_id)
                             .values(follow_up_analyses=follow_up_analyses)
                         )
                     else:
@@ -216,51 +222,112 @@ async def initialise_report(
     except Exception as e:
         traceback.print_exc()
         print(e)
-        err = "Could not create a new report."
-        new_report_data = None
+        err = "Could not create a new analysis."
+        new_analysis_data = None
     finally:
-        return err, new_report_data
+        return err, new_analysis_data
 
 
-def get_report_data(report_id):
+def get_analysis_data(analysis_id):
     try:
         err = None
-        report_data = {}
+        analysis_data = {}
 
-        if report_id == "" or not report_id:
-            print(report_id == "")
-            print(report_id is None)
-            print(not report_id)
-            err = "Could not find report. Are you sure you have the correct link?"
+        if analysis_id == "" or not analysis_id:
+            print(analysis_id == "")
+            print(analysis_id is None)
+            print(not analysis_id)
+            err = "Could not find analyis. Are you sure you have the correct link?"
 
-        elif report_id != "" and report_id is not None and report_id != "new":
-            print("Looking for uuid: ", report_id)
-            # try to fetch report_data data
+        elif analysis_id != "" and analysis_id is not None and analysis_id != "new":
+            print("Looking for uuid: ", analysis_id)
+            # try to fetch analysis_data data
             with engine.begin() as conn:
                 row = conn.execute(
-                    select(Reports).where(Reports.report_id == report_id)
+                    select(Analyses).where(Analyses.analysis_id == analysis_id)
                 ).fetchone()
 
                 if row:
-                    print("Found uuid: ", report_id)
-                    report_data = report_data_from_row(row)
+                    print("Found uuid: ", analysis_id)
+                    analysis_data = analysis_data_from_row(row)
                 else:
-                    err = (
-                        "Could not find report. Are you sure you have the correct link?"
-                    )
+                    err = "Could not find analyis. Are you sure you have the correct link?"
 
     except Exception as e:
         err = "Server error. Please contact us."
-        report_data = None
+        analysis_data = None
         print(e)
         traceback.print_exc()
 
     finally:
-        return err, report_data
+        return err, analysis_data
 
 
-async def update_report_data(
-    report_id, request_type=None, new_data=None, replace=False, overwrite_key=None
+def get_assignment_understanding(analysis_id):
+    """
+    Returns the assignment_understanding column from the analysis with the given analysis_id
+    """
+
+    try:
+        err = None
+        understanding = None
+
+        if analysis_id == "" or not analysis_id:
+            err = "Could not find analyis. Are you sure you have the correct link?"
+
+        elif analysis_id != "" and analysis_id is not None and analysis_id != "new":
+            # try to fetch analysis_data data
+            with engine.begin() as conn:
+                row = conn.execute(
+                    select(
+                        Analyses.__table__.columns["assignment_understanding"]
+                    ).where(Analyses.analysis_id == analysis_id)
+                ).fetchone()
+
+                if row:
+                    understanding = row.assignment_understanding
+                else:
+                    err = "Could not find analyis. Are you sure you have the correct link?"
+
+    except Exception as e:
+        err = "Server error."
+        understanding = None
+        print(e)
+        traceback.print_exc()
+    finally:
+        return err, understanding
+
+
+def update_assignment_understanding(analysis_id, understanding):
+    """
+    Updates the assignment_understanding column in the analysis with the given analysis_id
+    """
+
+    try:
+        err = None
+
+        if analysis_id == "" or not analysis_id:
+            err = "Could not find analyis. Are you sure you have the correct link?"
+
+        elif analysis_id != "" and analysis_id is not None and analysis_id != "new":
+            # try to fetch analysis_data data
+            with engine.begin() as conn:
+                conn.execute(
+                    update(Analyses)
+                    .where(Analyses.analysis_id == analysis_id)
+                    .values(assignment_understanding=understanding)
+                )
+
+    except Exception as e:
+        err = "Server error."
+        print(e)
+        traceback.print_exc()
+    finally:
+        return err
+
+
+async def update_analysis_data(
+    analysis_id, request_type=None, new_data=None, replace=False, overwrite_key=None
 ):
     err = None
     request_types = [
@@ -268,7 +335,7 @@ async def update_report_data(
         "understand",
         "gen_approaches",
         "gen_steps",
-        "gen_report",
+        "gen_analysis",
         "user_question",
     ]
     try:
@@ -284,8 +351,8 @@ async def update_report_data(
             with engine.begin() as conn:
                 # first get the data
                 row = conn.execute(
-                    select(Reports.__table__.columns[request_type]).where(
-                        Reports.report_id == report_id
+                    select(Analyses.__table__.columns[request_type]).where(
+                        Analyses.analysis_id == analysis_id
                     )
                 ).fetchone()
 
@@ -310,6 +377,7 @@ async def update_report_data(
                             )
                             replaced = 0
                             for i, item in enumerate(new_data):
+                                # try to find the item
                                 found = False
                                 for j, old_item in enumerate(curr_data):
                                     if old_item.get(overwrite_key) == item.get(
@@ -320,6 +388,8 @@ async def update_report_data(
                                         replaced += 1
                                         break
                                 if not found:
+                                    # just append
+                                    logging.info("Item not found. Appending.")
                                     curr_data.append(item)
 
                             print(
@@ -330,27 +400,24 @@ async def update_report_data(
                             )
                     else:
                         curr_data = new_data
-                    print("writing to ", request_type, "in report id: ", report_id)
+                    print("writing to ", request_type, "in analyis id: ", analysis_id)
                     print("writing array of length: ", len(curr_data))
-                    # insert back into reports table
+                    # insert back into analyses table
                     # if the request type is user_question, we will also update the embedding
                     if request_type == "user_question":
-                        print(new_data)
-                        print(report_id)
                         conn.execute(
-                            update(Reports)
-                            .where(Reports.report_id == report_id)
+                            update(Analyses)
+                            .where(Analyses.analysis_id == analysis_id)
                             .values({request_type: new_data})
                         )
                     else:
-                        print(curr_data)
                         conn.execute(
-                            update(Reports)
-                            .where(Reports.report_id == report_id)
+                            update(Analyses)
+                            .where(Analyses.analysis_id == analysis_id)
                             .values({request_type: curr_data})
                         )
                 else:
-                    err = "Report not found."
+                    err = "Analysis not found."
                     raise ValueError(err)
 
     except Exception as e:
@@ -361,15 +428,11 @@ async def update_report_data(
         return err
 
 
-def report_data_from_row(row):
+def analysis_data_from_row(row):
     rpt = None
     try:
         clarify = None if row.clarify is None else row.clarify
-        understand = None if row.understand is None else row.understand
-        gen_approaches = None if row.gen_approaches is None else row.gen_approaches
         gen_steps = None if row.gen_steps is None else row.gen_steps
-        gen_report = row.gen_report or None
-        report_markdown = row.report_markdown or ""
         parent_analyses = row.parent_analyses or []
         follow_up_analyses = row.follow_up_analyses or []
         direct_parent_id = row.direct_parent_id or None
@@ -378,9 +441,8 @@ def report_data_from_row(row):
         # we should have a better solution to this.
         rpt = {
             "user_question": row.user_question,
-            "report_id": row.report_id,
+            "analysis_id": row.analysis_id,
             "timestamp": row.timestamp,
-            "report_markdown": report_markdown,
             "parent_analyses": parent_analyses,
             "follow_up_analyses": follow_up_analyses,
             "direct_parent_id": direct_parent_id,
@@ -391,26 +453,11 @@ def report_data_from_row(row):
                 "success": True,
                 "clarification_questions": clarify,
             }
-        if understand is not None:
-            rpt["understand"] = {
-                "success": True,
-                "understanding": understand,
-            }
-        if gen_approaches is not None:
-            rpt["gen_approaches"] = {
-                "success": True,
-                "approaches": gen_approaches,
-            }
 
         if gen_steps is not None:
             rpt["gen_steps"] = {
                 "success": True,
                 "steps": gen_steps,
-            }
-        if gen_report is not None:
-            rpt["gen_report"] = {
-                "success": True,
-                "report_sections": gen_report,
             }
 
     except Exception as e:
@@ -421,29 +468,29 @@ def report_data_from_row(row):
         return rpt
 
 
-def get_all_reports(api_key: str):
-    # get reports from the reports table
+def get_all_analyses(api_key: str):
+    # get analyses from the analyses table
     err = None
-    reports = []
+    analyses = []
     try:
         with engine.begin() as conn:
             # first get the data
             rows = conn.execute(
-                select(Reports).where(Reports.api_key == api_key)
+                select(Analyses).where(Analyses.api_key == api_key)
             ).fetchall()
             if len(rows) > 0:
                 # reshape with "success = true"
                 for row in rows:
-                    rpt = report_data_from_row(row)
+                    rpt = analysis_data_from_row(row)
                     if rpt is not None:
-                        reports.append(rpt)
+                        analyses.append(rpt)
     except Exception as e:
         print(e)
         traceback.print_exc()
-        err = "Something went wrong while fetching your reports. Please contact us."
-        reports = None
+        err = "Something went wrong while fetching your analyses. Please contact us."
+        analyses = None
     finally:
-        return err, reports
+        return err, analyses
 
 
 def create_table_chart(table_data):
@@ -568,22 +615,22 @@ async def get_table_data(table_id):
 
 
 async def get_all_analyses(api_key: str):
-    # get reports from the reports table
+    # get analyses from the analyses table
     err = None
     analyses = []
     try:
-        """Create a new report in the defog_reports table"""
+        """Create a new analyis in the defog_analyses table"""
         with engine.begin() as conn:
             # first get the data
             rows = conn.execute(
                 select(
                     *[
-                        Reports.__table__.columns["report_id"],
-                        Reports.__table__.columns["user_question"],
+                        Analyses.__table__.columns["analysis_id"],
+                        Analyses.__table__.columns["user_question"],
                     ]
                 )
-                .where(Reports.api_key == api_key)
-                .where(Reports.report_id.contains("analysis"))
+                .where(Analyses.api_key == api_key)
+                .where(Analyses.analysis_id.contains("analysis"))
             ).fetchall()
 
             if len(rows) > 0:
@@ -637,17 +684,17 @@ async def update_particular_step(analysis_id, tool_run_id, prop, new_val):
     if tool_run_id is None or prop is None or analysis_id is None:
         return "Invalid tool run data"
 
-    # get the report data
+    # get the analyis data
     with engine.begin() as conn:
         analysis_data = conn.execute(
-            select(Reports).where(Reports.report_id == analysis_id)
+            select(Analyses).where(Analyses.analysis_id == analysis_id)
         ).fetchone()
 
         if analysis_data is not None:
             # copy row mapping
-            report = analysis_data._mapping
+            analyis = analysis_data._mapping
             # update the property
-            new_steps = report.gen_steps
+            new_steps = analyis.gen_steps
             for step in new_steps:
                 if step["tool_run_id"] == tool_run_id:
                     step[prop] = new_val
@@ -655,8 +702,8 @@ async def update_particular_step(analysis_id, tool_run_id, prop, new_val):
 
             # update the row
             conn.execute(
-                update(Reports)
-                .where(Reports.report_id == analysis_id)
+                update(Analyses)
+                .where(Analyses.analysis_id == analysis_id)
                 .values(gen_steps=new_steps)
             )
 
@@ -698,7 +745,7 @@ async def store_tool_run(analysis_id, step, run_result, skip_step_update=False):
                 insert_data["outputs"][k] = {}
 
                 if data is not None and type(data) == type(pd.DataFrame()):
-                    # save this dataset on local disk in feather format in report_dataset_dir/datasets
+                    # save this dataset on local disk in feather format in analysis_dataset_dir/datasets
                     db_path = step["tool_run_id"] + "_output-" + k + ".feather"
 
                     # for sending to client, store max 1000 rows
@@ -728,12 +775,12 @@ async def store_tool_run(analysis_id, step, run_result, skip_step_update=False):
 
                     # have to reset index for feather to work
                     data.reset_index(drop=True).to_feather(
-                        report_assets_dir + "/datasets/" + db_path
+                        analysis_assets_dir + "/datasets/" + db_path
                     )
 
                     # also store this in gcs
                     files_for_rabbitmq_queue.append(
-                        report_assets_dir + "/datasets/" + db_path
+                        analysis_assets_dir + "/datasets/" + db_path
                     )
 
                 # check if it has reactive_vars
@@ -746,7 +793,7 @@ async def store_tool_run(analysis_id, step, run_result, skip_step_update=False):
                     try:
                         # i fear some error here someday
                         files_to_store_in_gcs += [
-                            report_assets_dir + "/" + img["path"]
+                            analysis_assets_dir + "/" + img["path"]
                             for img in chart_images
                         ]
                     except Exception as e:
@@ -784,7 +831,7 @@ async def store_tool_run(analysis_id, step, run_result, skip_step_update=False):
                 conn.execute(insert(ToolRuns).values(insert_data))
 
         if not skip_step_update:
-            # also update the error message in gen_steps in the reports table
+            # also update the error message in gen_steps in the analyses table
             await update_particular_step(
                 analysis_id,
                 step["tool_run_id"],
@@ -881,7 +928,7 @@ async def update_tool_run_data(analysis_id, tool_run_id, prop, new_val):
                     .where(ToolRuns.tool_run_id == tool_run_id)
                     .values(error_message=new_val, edited=False, step=new_step)
                 )
-            # also remove errors from the steps in the report_data
+            # also remove errors from the steps in the analysis_data
             await update_particular_step(
                 analysis_id, tool_run_id, "error_message", new_val
             )
@@ -899,7 +946,7 @@ async def update_tool_run_data(analysis_id, tool_run_id, prop, new_val):
                     .where(ToolRuns.tool_run_id == tool_run_id)
                     .values(step=step, analysis_id=analysis_id, edited=True)
                 )
-            # we should also update this in the defog_reports table in the gen_steps column
+            # we should also update this in the defog_analyses table in the gen_steps column
             await update_particular_step(analysis_id, tool_run_id, "inputs", new_val)
 
         elif prop == "outputs":
@@ -910,7 +957,7 @@ async def update_tool_run_data(analysis_id, tool_run_id, prop, new_val):
             # don't need to check for chart_images or reactive_vars
             for k in new_val:
                 # update the row
-                # save this dataset on local disk in feather format in report_dataset_dir/datasets
+                # save this dataset on local disk in feather format in analysis_dataset_dir/datasets
                 db_path = step["tool_run_id"] + "_output-" + k + ".feather"
                 data = new_val[k]["data"]
 
@@ -929,13 +976,13 @@ async def update_tool_run_data(analysis_id, tool_run_id, prop, new_val):
 
                     # have to reset index for feather to work
                     data.reset_index(drop=True).to_feather(
-                        report_assets_dir + "/datasets/" + db_path
+                        analysis_assets_dir + "/datasets/" + db_path
                     )
 
                     # also store this in gcs
 
                     files_for_rabbitmq_queue.append(
-                        report_assets_dir + "/datasets/" + db_path
+                        analysis_assets_dir + "/datasets/" + db_path
                     )
 
             # add files to rabbitmq queue
@@ -968,7 +1015,7 @@ async def update_tool_run_data(analysis_id, tool_run_id, prop, new_val):
         return {"success": False, "error_message": str(e)}
 
 
-def get_multiple_reports(report_ids=[], columns=["report_id", "user_question"]):
+def get_multiple_analyses(analysis_ids=[], columns=["analysis_id", "user_question"]):
     err = None
     analyses = []
     try:
@@ -977,11 +1024,11 @@ def get_multiple_reports(report_ids=[], columns=["report_id", "user_question"]):
             rows = conn.execute(
                 select(
                     *[
-                        Reports.__table__.columns[c]
+                        Analyses.__table__.columns[c]
                         for c in columns
-                        if c in Reports.__table__.columns
+                        if c in Analyses.__table__.columns
                     ]
-                ).where(Reports.report_id.in_(report_ids))
+                ).where(Analyses.analysis_id.in_(analysis_ids))
             ).fetchall()
 
             if len(rows) > 0:
@@ -1234,8 +1281,8 @@ async def get_analysis_versions(root_analysis_id):
             cursor = conn.connection.cursor()
             cursor.execute(
                 """
-                SELECT report_id, user_question, gen_steps
-                FROM defog_reports
+                SELECT analysis_id, user_question, gen_steps
+                FROM defog_analyses
                 WHERE root_analysis_id = ?
                 ORDER BY timestamp ASC
                 """,
@@ -1267,7 +1314,7 @@ async def get_analysis_question_context(analysis_id, max_n=5):
         count = 0
         while True:
             # get this analysis
-            err, analysis_data = get_report_data(curr_analysis_id)
+            err, analysis_data = get_analysis_data(curr_analysis_id)
             if err:
                 raise Exception(err)
 

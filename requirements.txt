@@ -1,6 +1,7 @@
+aiohttp
 colorama
 databricks-sql-connector
-defog==0.65.8
+defog
 fastapi
 google-auth
 google-cloud-bigquery
@@ -14,6 +15,7 @@ pandasql
 psycopg2-binary
 python-dotenv
 pyyaml
+redis
 redshift_connector
 requests
 resend

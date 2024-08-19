@@ -21,7 +21,10 @@ def login_user(username, password):
     else:
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
 

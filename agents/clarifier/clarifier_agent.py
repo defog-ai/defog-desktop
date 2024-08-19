@@ -7,6 +7,8 @@ import asyncio
 import requests
 import os
 
+from utils import make_request
+
 default_values_formatted = {
     "multi select": [],
     "text input": "",
@@ -21,6 +23,24 @@ default_values = {
 }
 
 llm_calls_url = os.environ.get("LLM_CALLS_URL", "https://api.defog.ai/agent_endpoint")
+
+
+async def turn_into_statements(clarification_questions, dfg_api_key):
+    url = llm_calls_url
+    filtered = [q for q in clarification_questions if q.get("response", "") != ""]
+    if len(filtered) == 0:
+        return []
+
+    payload = {
+        "request_type": "turn_into_statement",
+        "clarification_questions": [
+            q for q in clarification_questions if q.get("response", "") != ""
+        ],
+        "api_key": dfg_api_key,
+    }
+    r = await make_request(url, payload=payload)
+    statements = r.json()["statements"]
+    return statements
 
 
 def parse_q(q):
@@ -45,6 +65,28 @@ def parse_q(q):
         # print(e)
         # traceback.print_exc()
         return []
+
+
+async def get_clarification(question, api_key, dev=False, temp=False):
+    payload = {
+        "request_type": "clarify_task",
+        "question": question,
+        "api_key": api_key,
+        "dev": dev,
+        "temp": temp,
+    }
+
+    r = await make_request(
+        llm_calls_url,
+        payload=payload,
+    )
+
+    if r.status_code == 200:
+        clarifying_questions = r.json()["clarifications"]
+        parsed_clarifying_questions = parse_q(clarifying_questions)
+        return parsed_clarifying_questions
+    else:
+        raise Exception(f"Error getting clarifications: {r.status_code}")
 
 
 class Clarifier:

@@ -4,7 +4,7 @@ import sqlparse
 from datetime import datetime
 
 DEFOG_API_KEY = os.environ["DEFOG_API_KEY"]  # replace with your DEFOG_API_KEY
-DEFOG_API_KEY_NAMES = os.environ.get("DEFOG_API_KEY_NAMES", "")
+DEFOG_API_KEY_NAMES = os.environ.get("DEFOG_API_KEY_NAMES")
 
 
 async def make_request(url, json):

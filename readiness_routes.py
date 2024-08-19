@@ -18,7 +18,10 @@ async def check_basic_readiness(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -60,7 +63,10 @@ async def check_golden_queries_validity(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -86,7 +92,10 @@ async def check_glossary_consistency(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -107,7 +116,10 @@ async def check_golden_query_coverage(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")

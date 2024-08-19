@@ -34,8 +34,10 @@ if not os.path.exists(home_dir / "defog_report_assets"):
     # create one
     os.mkdir(home_dir / "defog_report_assets")
 
-report_assets_dir = home_dir / "defog_report_assets"
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+analysis_assets_dir = home_dir / "defog_report_assets"
+analysis_assets_dir = os.environ.get(
+    "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
+)
 
 
 # rerun_step_and_dependents function runs the step, the step's parents if needed AND all descendants that depend on this step recursively
@@ -91,7 +93,7 @@ async def rerun_step_and_parents(
     # then it will need to iterate through all inputs of the step then for each input:
     # it will have to check if the input has "global_dict" in it
     # if so it will find the step which produces that output target_step
-    # once found, it will find if the dataset exists in the report_assets/datasets folder with the file name target_step["tool_run_id"] + output_storage_key + ".feather"
+    # once found, it will find if the dataset exists in the analysis_assets/datasets folder with the file name target_step["tool_run_id"] + output_storage_key + ".feather"
     # if so, it will load that dataset and replace the global_dict.variable_name reference with the dataset
     # otherwise, it will run the rerun_step function recursively on the target_step
 
@@ -136,7 +138,7 @@ async def rerun_step_and_parents(
 
                     # check if the file exists
                     found = False
-                    f_path = os.path.join(report_assets_dir, "datasets", f_name)
+                    f_path = os.path.join(analysis_assets_dir, "datasets", f_name)
                     if not tool_run_data["edited"]:
                         if os.path.isfile(f_path):
                             log_msg(f"Input {var} found in the file system.")

@@ -27,7 +27,10 @@ async def add_user(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     if not gsheets_url:
@@ -100,7 +103,10 @@ async def add_users_csv(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     if not users_csv:
@@ -161,7 +167,10 @@ async def get_users(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     with engine.begin() as conn:
@@ -178,7 +187,10 @@ async def delete_user(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     username = params.get("username", None)

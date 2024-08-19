@@ -27,6 +27,10 @@ print(DEFOG_BASE_URL, flush=True)
 home_dir = os.path.expanduser("~")
 defog_path = os.path.join(home_dir, ".defog")
 
+# create defog_path if it doesn't exist
+if not os.path.exists(defog_path):
+    os.makedirs(defog_path)
+
 router = APIRouter()
 
 
@@ -37,7 +41,10 @@ async def get_tables_db_creds(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -100,7 +107,10 @@ async def get_metadata(request: Request):
     if not validate_user(token):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -163,7 +173,10 @@ async def update_db_creds(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -192,7 +205,10 @@ async def generate_metadata(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -222,6 +238,9 @@ async def generate_metadata(request: Request):
         else:
             if "public" not in schemas:
                 schemas.append("public")
+
+    print(schemas)
+    print(tables)
 
     if schemas != ["public"] and defog.db_type == "postgres":
         table_metadata = await asyncio.to_thread(
@@ -274,7 +293,10 @@ async def update_metadata(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -312,11 +334,7 @@ async def update_metadata(request: Request):
             "dev": dev,
         },
     )
-    if "detail" in r:
-        return JSONResponse(
-            status_code=409,
-            content={"error": r["detail"]},
-        )
+
     return r
 
 
@@ -327,7 +345,10 @@ async def copy_prod_to_dev(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
     key_name = params.get("key_name")
     api_key = get_api_key_from_key_name(key_name)
@@ -346,7 +367,10 @@ async def copy_prod_to_dev(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
     key_name = params.get("key_name")
     api_key = get_api_key_from_key_name(key_name)
@@ -366,7 +390,10 @@ async def get_glossary_golden_queries(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -395,7 +422,10 @@ async def update_glossary(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -424,7 +454,10 @@ async def update_golden_queries(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")
@@ -462,7 +495,10 @@ async def upload_csv(request: Request):
     if not validate_user(token):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name", params.get("keyName"))
@@ -541,7 +577,10 @@ async def preview_table(request: Request):
     if not validate_user(token):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
 
     key_name = params.get("key_name")

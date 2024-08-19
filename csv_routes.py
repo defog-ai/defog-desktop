@@ -79,6 +79,28 @@ async def generate_query_csv(request: Request):
     key_name = params.get("key_name", None)
     question = params.get("question", None)
     metadata = params.get("metadata", None)
+    previous_questions = params.get("previous_questions", [])
+
+    if len(previous_questions) > 0:
+        previous_questions = previous_questions[:-1]
+
+    prev_questions = []
+    for item in previous_questions:
+        prev_question = item.get("user_question")
+        if question:
+            prev_steps = (
+                item.get("analysisManager", {})
+                .get("analysisData", {})
+                .get("gen_steps", {})
+                .get("steps", [])
+            )
+            if len(prev_steps) > 0:
+                for step in prev_steps:
+                    if "sql" in step:
+                        prev_sql = step["sql"]
+                        prev_questions.append(prev_question)
+                        prev_questions.append(prev_sql)
+                        break
 
     # metadata should be a list of dictionaries with keys 'table_name', 'column_name', 'data_type', and 'column_description'\
 
@@ -136,6 +158,7 @@ async def generate_query_csv(request: Request):
             "question": question,
             "metadata": metadata_dict,
             "db_type": "sqlite",
+            "previous_context": prev_questions,
         },
     )
     return r

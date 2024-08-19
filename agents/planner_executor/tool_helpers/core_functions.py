@@ -1,4 +1,5 @@
 from typing import Dict, List
+import tiktoken
 from datetime import date
 import pandas as pd
 import base64
@@ -15,15 +16,17 @@ if not os.path.exists(home_dir / "defog_report_assets"):
     # create one
     os.mkdir(home_dir / "defog_report_assets")
 
-report_assets_dir = home_dir / "defog_report_assets"
-report_assets_dir = os.environ.get("REPORT_ASSETS_DIR", report_assets_dir.as_posix())
+analysis_assets_dir = home_dir / "defog_report_assets"
+analysis_assets_dir = os.environ.get(
+    "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
+)
 
 
 def encode_image(image_path):
     """
     Encodes an image to base64.
     """
-    image_path = os.path.join(report_assets_dir, image_path)
+    image_path = os.path.join(analysis_assets_dir, image_path)
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
@@ -78,11 +81,9 @@ def resolve_input(inp, global_dict):
         return inp
 
 
-async def analyse_data(
-    question: str, data: pd.DataFrame, image_path: str = None
-) -> str:
+async def analyse_data(question: str, data: pd.DataFrame, image_path: str = None):
     """
-    Generate a short summary of the results for the given qn.
+    Generate a short summary of the results for the given qn. This is a placeholder function as it is not implemented in defog-desktop, and only implemented in defog-self-hosted.
     """
     yield {"success": False, "model_analysis": "NONE"}
     return

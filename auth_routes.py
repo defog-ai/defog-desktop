@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Request
-from auth_utils import login_user, reset_password
+from fastapi import APIRouter, Request, HTTPException
+from auth_utils import login_user, reset_password, get_hashed_password
 from db_utils import validate_user
 from fastapi.responses import JSONResponse
 
@@ -31,7 +31,10 @@ async def reset_password(request: Request):
     if not validate_user(token, user_type="admin"):
         return JSONResponse(
             status_code=401,
-            content={"error": "unauthorized"},
+            content={
+                "error": "unauthorized",
+                "message": "Invalid username or password",
+            },
         )
     if not username:
         return {"error": "no user id provided"}

@@ -4,10 +4,10 @@ import re
 import json
 import traceback
 from colorama import Fore, Style
-
 import httpx
-
 import os
+
+import pandas as pd
 
 
 # custom list class with a overwrite_key attribute
@@ -162,6 +162,24 @@ async def make_request(url, payload, verbose=False):
     return r
 
 
+def deduplicate_columns(df: pd.DataFrame):
+    # de-duplicate column names
+    # if the same column name exists more than once, add a suffix
+    deduplicated_df = df.copy()
+    columns = deduplicated_df.columns.tolist()
+    seen = {}
+    for i, item in enumerate(columns):
+        if item in seen:
+            columns[i] = f"{item}_{seen[item]}"
+            seen[item] += 1
+        else:
+            seen[item] = 1
+
+    deduplicated_df.columns = columns
+
+    return deduplicated_df
+
+
 def filter_function_inputs(fn, inputs):
     """
     Used to filter down a dict's keys to only the parameters that are required by a function
@@ -197,3 +215,7 @@ def wrap_in_async(fn):
         wrapped_fn = async_fn
 
     return wrapped_fn
+
+
+def add_indent(level=1):
+    return "...." * level
