@@ -16,21 +16,42 @@ engine = create_engine(f"sqlite:///{path_to_sql_file}", echo=True)
 metadata = MetaData()
 
 # Define tables
-defog_reports = Table(
-    "defog_reports",
+defog_docs = Table(
+    "defog_docs",
     metadata,
-    Column("report_id", Text, primary_key=True),
+    Column("doc_id", Text, primary_key=True),
+    Column("doc_md", Text),
+    Column("doc_blocks", JSON),
+    Column("editor_defog_blocks", JSON),
+    Column("api_key", Text, nullable=False),
+    Column("timestamp", Text),
+    Column("username", Text),
+    Column("doc_xml", Text),
+    Column("doc_uint8", JSON),
+    Column("doc_title", Text),
+    Column("archived", Boolean, default=False),
+)
+
+defog_recently_viewed_docs = Table(
+    "defog_recently_viewed_docs",
+    metadata,
+    Column("username", Text, primary_key=True),
+    Column("api_key", Text, nullable=False),
+    Column("recent_docs", JSON),
+)
+
+defog_analyses = Table(
+    "defog_analyses",
+    metadata,
+    Column("analysis_id", Text, primary_key=True),
     Column("api_key", Text, nullable=False),
     Column("email", Text),
     Column("timestamp", Text),
-    Column("report_uuid", Text),
     Column("approaches", JSON),
-    Column("report_markdown", Text),
     Column("clarify", JSON),
     Column("understand", JSON),
     Column("gen_approaches", JSON),
     Column("user_question", Text),
-    Column("gen_report", JSON),
     Column("gen_steps", JSON),
     Column("follow_up_analyses", JSON),
     Column("parent_analyses", JSON),
@@ -104,12 +125,19 @@ defog_users = Table(
     Column("is_verified", Integer),
 )
 
-defog_db_creds = Table(
-    "defog_db_creds",
+defog_plans_feedback = Table(
+    "defog_plans_feedback",
     metadata,
-    Column("api_key", Text, primary_key=True),
-    Column("db_type", Text),
-    Column("db_creds", JSON),
+    Column("analysis_id", Text, primary_key=True),
+    Column("api_key", Text, nullable=False),
+    Column("user_question", Text, nullable=False),
+    Column("username", Text, nullable=False),
+    Column("comments", JSON),
+    Column("is_correct", Boolean, nullable=False),
+    Column("metadata", Text, nullable=False),
+    Column("client_description", Text),
+    Column("glossary", Text),
+    Column("db_type", Text, nullable=False),
 )
 
 # Create tables in the database
