@@ -614,27 +614,33 @@ async def preview_table(request: Request):
     # to prevent this, we need to check that the table name only has alphanumeric characters, underscores, or spaces
     # further, we will also add quotes around the table name to prevent SQL injection using a space in the table name
 
-    # check that the table name only has alphanumeric characters, underscores, spaces, or periods
+    # check that the table name only has alphanumeric characters, underscores, spaces, hyphens, or periods
     # use regex for this
-    if not re.match(r"^[\w .]+$", table_name):
+    if not re.match(r"^[\w .-]+$", table_name):
         # \w: Matches any word character. A word character is defined as any alphanumeric character plus the underscore (a-z, A-Z, 0-9, _).
         # the space after \w is intentional, to allow spaces in the table name
         return {"error": "invalid table name"}
 
     # in these select statements, add quotes around the table name to prevent SQL injection using a space in the table name
-    if db_type != "sqlserver":
+    if db_type not in ["sqlserver", "bigquery"]:
         sql_query = f'SELECT * FROM "{table_name}" LIMIT 10'
-    else:
+    elif db_type == "sqlserver":
         sql_query = f'SELECT TOP 10 * FROM "{table_name}"'
+    elif db_type == "bigquery":
+        sql_query = f"SELECT * FROM `{table_name}` LIMIT 10"
 
     print("Executing preview table query", flush=True)
     print(sql_query, flush=True)
+
+    if db_type == "bigquery":
+        db_creds["json_key_path"] = "./bq.json"
 
     try:
         colnames, data, _ = await asyncio.to_thread(
             execute_query, sql_query, api_key, db_type, db_creds, retries=0, temp=temp
         )
-    except:
+    except Exception as e:
+        print(e)
         return {"error": "error executing query"}
 
     return {"data": data, "columns": colnames}
