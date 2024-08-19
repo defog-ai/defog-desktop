@@ -11,12 +11,10 @@ if DEFOG_API_KEY is None or DEFOG_API_KEY == "" or DEFOG_API_KEY == "YOUR_API_KE
     )
 
 import traceback
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from connection_manager import ConnectionManager
-from agents.planner_executor.execute_tool import execute_tool
-from uuid import uuid4
 from utils import make_request
 
 from db_utils import (
@@ -185,6 +183,43 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+async def analyse_data():
+    yield {
+        "success": False,
+        "model_analysis": "The analysis feature is only available in the Defog Docker version. In this version, you can look at the data returned from SQL query that Defog generated.",
+    }
+    return
+
+
+@app.websocket("/analyse_data")
+async def analyse_data_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if "ping" in data:
+                # don't do anything
+                continue
+
+            async for chunk in analyse_data():
+                await manager.send_personal_message(chunk, websocket)
+
+    except WebSocketDisconnect as e:
+        # logging.info("Disconnected. Error: " +  str(e))
+        # traceback.print_exc()
+        manager.disconnect(websocket)
+        await websocket.close()
+    except Exception as e:
+        # logging.info("Disconnected. Error: " +  str(e))
+        traceback.print_exc()
+        await manager.send_personal_message(
+            {"success": False, "error_message": str(e)[:300]}, websocket
+        )
+        # other reasons for disconnect, like websocket being closed or a timeout
+        manager.disconnect(websocket)
+        await websocket.close()
 
 
 import threading

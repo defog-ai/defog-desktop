@@ -161,9 +161,6 @@ async def generate_step(request: Request):
                 analysis_id=analysis_id
             )
 
-            if err:
-                raise Exception("Error fetching assignment understanding from database")
-
             # NOTE: to ask Manas: if the above statement raises an error, then this bit becomes redundant, no?
             if not assignment_understanding:
                 err = await generate_assignment_understanding(
