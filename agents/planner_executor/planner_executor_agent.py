@@ -88,8 +88,17 @@ def warn(msg):
 #   ...
 # }
 llm_calls_url = os.environ.get("LLM_CALLS_URL", "https://api.defog.ai/agent_endpoint")
+from pathlib import Path
+
+home_dir = Path.home()
+# see if we have a custom report assets directory
+if not os.path.exists(home_dir / "defog_report_assets"):
+    # create one
+    os.mkdir(home_dir / "defog_report_assets")
+
+analysis_assets_dir = home_dir / "defog_report_assets"
 analysis_assets_dir = os.environ.get(
-    "ANALYSIS_ASSETS_DIR", "/agent-assets/analysis-assets"
+    "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
 )
 
 # check if analysis_assets_dir/datasets exists
