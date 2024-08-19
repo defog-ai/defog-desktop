@@ -11,3 +11,7 @@ Defog is a privacy friendly AI data analyst that lets you ask data questions in 
 5. [only if using bigquery] Download your Service Account Key as a JSON file, name it `bq.json`, and save it in the same directory as this `README.md` file
 6. Launch defog with `python main.py`. This will automatically open up http://localhost:33364/static/extract-metadata.html in your browser.
 7. If this is your first time using defog, log in with the user id `admin`, and the password `admin`
+
+## Docs and Guides
+
+For more details documentation, please refer to [docs.defog.ai](https://docs.defog.ai/)
