@@ -16,30 +16,6 @@ engine = create_engine(f"sqlite:///{path_to_sql_file}", echo=True)
 metadata = MetaData()
 
 # Define tables
-defog_docs = Table(
-    "defog_docs",
-    metadata,
-    Column("doc_id", Text, primary_key=True),
-    Column("doc_md", Text),
-    Column("doc_blocks", JSON),
-    Column("editor_defog_blocks", JSON),
-    Column("api_key", Text, nullable=False),
-    Column("timestamp", Text),
-    Column("username", Text),
-    Column("doc_xml", Text),
-    Column("doc_uint8", JSON),
-    Column("doc_title", Text),
-    Column("archived", Boolean, default=False),
-)
-
-defog_recently_viewed_docs = Table(
-    "defog_recently_viewed_docs",
-    metadata,
-    Column("username", Text, primary_key=True),
-    Column("api_key", Text, nullable=False),
-    Column("recent_docs", JSON),
-)
-
 defog_analyses = Table(
     "defog_analyses",
     metadata,
@@ -125,19 +101,12 @@ defog_users = Table(
     Column("is_verified", Integer),
 )
 
-defog_plans_feedback = Table(
-    "defog_plans_feedback",
+defog_db_creds = Table(
+    "defog_db_creds",
     metadata,
-    Column("analysis_id", Text, primary_key=True),
-    Column("api_key", Text, nullable=False),
-    Column("user_question", Text, nullable=False),
-    Column("username", Text, nullable=False),
-    Column("comments", JSON),
-    Column("is_correct", Boolean, nullable=False),
-    Column("metadata", Text, nullable=False),
-    Column("client_description", Text),
-    Column("glossary", Text),
-    Column("db_type", Text, nullable=False),
+    Column("api_key", Text, primary_key=True),
+    Column("db_type", Text),
+    Column("db_creds", JSON),
 )
 
 # Create tables in the database
