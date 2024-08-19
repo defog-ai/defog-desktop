@@ -48,7 +48,6 @@ ToolRuns = Base.classes.defog_tool_runs
 Toolboxes = Base.classes.defog_toolboxes
 Tools = Base.classes.defog_tools
 Users = Base.classes.defog_users
-Feedback = Base.classes.defog_plans_feedback
 DbCreds = Base.classes.defog_db_creds
 
 
@@ -1041,34 +1040,6 @@ def get_multiple_analyses(analysis_ids=[], columns=["analysis_id", "user_questio
         analyses = []
     finally:
         return err, analyses
-
-
-async def store_feedback(
-    api_key,
-    user_question,
-    analysis_id,
-    is_correct,
-    comments,
-    db_type,
-):
-    error = None
-    did_overwrite = False
-
-    asyncio.create_task(
-        make_request(
-            f"{os.environ.get('DEFOG_BASE_URL', 'https://api.defog.ai')}/update_agent_feedback",
-            {
-                "api_key": api_key,
-                "user_question": user_question,
-                "analysis_id": analysis_id,
-                "is_correct": is_correct,
-                "comments": comments,
-                "db_type": db_type,
-            },
-        )
-    )
-
-    return error, did_overwrite
 
 
 def get_all_tools():
