@@ -48,9 +48,9 @@ async def data_fetcher_and_aggregator(
         )
         query = res["query_generated"]
         print(query, flush=True)
-    except:
+    except Exception as e:
         return {
-            "error_message": "There was an error in generating the query. Please try again."
+            "error_message": f"There was an error in generating the query. Please try again. The error was {str(e)}"
         }
 
     if not safe_sql(query):
