@@ -21,6 +21,7 @@ from db_utils import (
     get_all_analyses,
     get_analysis_data,
     initialise_analysis,
+    get_all_tools,
 )
 from generic_utils import get_api_key_from_key_name
 import integration_routes, query_routes, admin_routes, auth_routes, readiness_routes, csv_routes, feedback_routes, agent_routes, imgo_routes
@@ -220,6 +221,17 @@ async def analyse_data_endpoint(websocket: WebSocket):
         # other reasons for disconnect, like websocket being closed or a timeout
         manager.disconnect(websocket)
         await websocket.close()
+
+
+@app.post("/get_user_tools")
+async def get_user_tools(request: Request):
+    """
+    Get all tools available to the user.
+    """
+    err, tools = get_all_tools()
+    if err:
+        return {"success": False, "error_message": err}
+    return {"success": True, "tools": tools}
 
 
 import threading
