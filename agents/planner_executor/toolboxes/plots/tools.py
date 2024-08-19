@@ -14,6 +14,20 @@ from agents.planner_executor.tool_helpers.tool_param_types import (
 
 import yaml
 
+import os
+from pathlib import Path
+
+home_dir = Path.home()
+# see if we have a custom report assets directory
+if not os.path.exists(home_dir / "defog_report_assets"):
+    # create one
+    os.mkdir(home_dir / "defog_report_assets")
+
+analysis_assets_dir = home_dir / "defog_report_assets"
+analysis_assets_dir = os.environ.get(
+    "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
+)
+
 
 def validate_column(df, col_name):
     """
@@ -58,10 +72,6 @@ async def boxplot(
     if "index" not in full_data.columns:
         full_data["index"] = range(len(full_data))
 
-    analysis_assets_dir = global_dict.get(
-        "analysis_assets_dir", "/agents-assets/analysis-assets"
-    )
-
     if type(color) == ListWithDefault:
         color = color.default_value
 
@@ -92,7 +102,7 @@ async def boxplot(
         full_data["label"] = ""
 
     outputs = []
-    boxplot_path = f"boxplots/boxplot-{uuid4()}.png"
+    boxplot_path = f"boxplot-{uuid4()}.png"
     fig, ax = plt.subplots()
     plt.xticks(rotation=45)
     if facet:
@@ -206,12 +216,9 @@ async def heatmap(
         full_data["index"] = range(len(full_data))
 
     outputs = []
-    heatmap_path = f"heatmaps/heatmap-{uuid4()}.png"
+    heatmap_path = f"heatmap-{uuid4()}.png"
     fig, ax = plt.subplots()
     plt.xticks(rotation=45)
-    analysis_assets_dir = global_dict.get(
-        "analysis_assets_dir", "/agents-assets/analysis-assets"
-    )
 
     if not aggregation_type or type(aggregation_type) != str:
         raise ValueError("Aggregation type must be a string")
@@ -283,10 +290,6 @@ async def line_plot(
     if "index" not in full_data.columns:
         full_data["index"] = range(len(full_data))
 
-    analysis_assets_dir = global_dict.get(
-        "analysis_assets_dir", "/agents-assets/analysis-assets"
-    )
-
     if type(average_line_type) == ListWithDefault:
         average_line_type = average_line_type[0]
 
@@ -344,7 +347,7 @@ async def line_plot(
     # sort the dataframe by the x_column
     df = natural_sort(df, x_column, line_group_column)
 
-    chart_path = f"linecharts/linechart-{uuid4()}.png"
+    chart_path = f"linechart-{uuid4()}.png"
     fig, ax = plt.subplots()
     plt.xticks(rotation=45)
 
