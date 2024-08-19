@@ -40,7 +40,6 @@ app.include_router(readiness_routes.router)
 app.include_router(csv_routes.router)
 app.include_router(feedback_routes.router)
 app.include_router(imgo_routes.router)
-app.include_router(slack_routes.router)
 app.include_router(agent_routes.router)
 
 origins = ["*"]
@@ -60,6 +59,18 @@ analysis_assets_dir = home_dir / "defog_report_assets"
 analysis_assets_dir = os.environ.get(
     "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
 )
+
+from fastapi.staticfiles import StaticFiles
+
+base_path = os.path.abspath(".")
+print(base_path)
+one_level_up = os.path.abspath(os.path.join(base_path, ".."))
+if os.path.exists(os.path.join(one_level_up, "Content/Resources")):
+    base_path = os.path.join(one_level_up, "Content/Resources")
+
+directory = os.path.join(base_path, "out")
+print(directory)
+app.mount("/static", StaticFiles(directory=directory, html=True), name="static")
 
 
 llm_calls_url = os.environ.get("LLM_CALLS_URL", "https://api.defog.ai/agent_endpoint")
@@ -174,3 +185,15 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+import threading
+import webbrowser
+import uvicorn
+
+if __name__ == "__main__":
+    # open the browser after a 1 second delay
+    threading.Timer(
+        1, lambda: webbrowser.open("http://localhost:33364/static/index.html")
+    ).start()
+    uvicorn.run(app, host="0.0.0.0", port=33364)
