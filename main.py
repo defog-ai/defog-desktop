@@ -17,7 +17,6 @@ from starlette.websockets import WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from connection_manager import ConnectionManager
 from agents.planner_executor.execute_tool import execute_tool
-from agents.planner_executor.planner_executor_agent_rest import RESTExecutor
 from uuid import uuid4
 from utils import make_request
 
@@ -176,20 +175,3 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
-
-
-@app.post("/plan_and_execute")
-async def plan_and_execute(request: Request):
-    data = await request.json()
-    question = data.get("question")
-    dev = data.get("dev")
-    api_key = data.get("api_key")
-    assignment_understanding = data.get("assignment_understanding", "")
-    executor = RESTExecutor(
-        dfg_api_key=api_key,
-        user_question=question,
-        assignment_understanding=assignment_understanding,
-        dev=dev,
-    )
-    steps, success = await executor.execute()
-    return {"steps": steps, "success": success}
