@@ -11,9 +11,8 @@ if DEFOG_API_KEY is None or DEFOG_API_KEY == "" or DEFOG_API_KEY == "YOUR_API_KE
     )
 
 import traceback
-from fastapi import FastAPI, WebSocket, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
-from starlette.websockets import WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from connection_manager import ConnectionManager
 from agents.planner_executor.execute_tool import execute_tool
@@ -26,7 +25,7 @@ from db_utils import (
     initialise_analysis,
 )
 from generic_utils import get_api_key_from_key_name
-import integration_routes, query_routes, admin_routes, auth_routes, readiness_routes, csv_routes, feedback_routes, slack_routes, agent_routes, imgo_routes
+import integration_routes, query_routes, admin_routes, auth_routes, readiness_routes, csv_routes, feedback_routes, agent_routes, imgo_routes
 
 logging.basicConfig(level=logging.INFO)
 
