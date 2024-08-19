@@ -14,20 +14,6 @@ from agents.planner_executor.tool_helpers.tool_param_types import (
 
 import yaml
 
-import os
-from pathlib import Path
-
-home_dir = Path.home()
-# see if we have a custom report assets directory
-if not os.path.exists(home_dir / "defog_report_assets"):
-    # create one
-    os.mkdir(home_dir / "defog_report_assets")
-
-analysis_assets_dir = home_dir / "defog_report_assets"
-analysis_assets_dir = os.environ.get(
-    "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
-)
-
 
 def validate_column(df, col_name):
     """
@@ -67,6 +53,20 @@ async def boxplot(
     from uuid import uuid4
     import matplotlib.pyplot as plt
     import pandas as pd
+
+    import os
+    from pathlib import Path
+
+    home_dir = Path.home()
+    # see if we have a custom report assets directory
+    if not os.path.exists(home_dir / "defog_report_assets"):
+        # create one
+        os.mkdir(home_dir / "defog_report_assets")
+
+    analysis_assets_dir = home_dir / "defog_report_assets"
+    analysis_assets_dir = os.environ.get(
+        "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
+    )
 
     # if there's not an index column, create one
     if "index" not in full_data.columns:
@@ -211,6 +211,20 @@ async def heatmap(
     import matplotlib.pyplot as plt
     import pandas as pd
 
+    import os
+    from pathlib import Path
+
+    home_dir = Path.home()
+    # see if we have a custom report assets directory
+    if not os.path.exists(home_dir / "defog_report_assets"):
+        # create one
+        os.mkdir(home_dir / "defog_report_assets")
+
+    analysis_assets_dir = home_dir / "defog_report_assets"
+    analysis_assets_dir = os.environ.get(
+        "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
+    )
+
     # if there's not an index column, create one
     if "index" not in full_data.columns:
         full_data["index"] = range(len(full_data))
@@ -285,6 +299,20 @@ async def line_plot(
     import seaborn as sns
     from uuid import uuid4
     import matplotlib.pyplot as plt
+
+    import os
+    from pathlib import Path
+
+    home_dir = Path.home()
+    # see if we have a custom report assets directory
+    if not os.path.exists(home_dir / "defog_report_assets"):
+        # create one
+        os.mkdir(home_dir / "defog_report_assets")
+
+    analysis_assets_dir = home_dir / "defog_report_assets"
+    analysis_assets_dir = os.environ.get(
+        "REPORT_ASSETS_DIR", analysis_assets_dir.as_posix()
+    )
 
     # if there's not an index column, create one
     if "index" not in full_data.columns:
