@@ -17,6 +17,7 @@ async def query(request: Request):
     previous_context = body.get("previous_context")
     dev = body.get("dev", False)
     key_name = body.get("key_name")
+    glossary = body.get("glossary", "")
     api_key = get_api_key_from_key_name(key_name)
     res = get_db_type_creds(api_key)
 
@@ -54,6 +55,7 @@ async def query(request: Request):
         dev=dev,
         profile=True,
         ignore_cache=ignore_cache,
+        glossary=glossary,
     )
 
     if "generation_time_taken" in res:
