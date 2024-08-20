@@ -178,7 +178,9 @@ async def get_assets(path: str):
 
 @app.get("/")
 def read_root():
-    return {"status": "ok"}
+    return {
+        "status": "Hi there! You were probably looking to visit http://localhost:33364/static/query-data.html or http://localhost:33364/static/log-in.html"
+    }
 
 
 @app.get("/health")
