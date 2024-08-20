@@ -507,7 +507,7 @@ async def generate_assignment_understanding(
         analysis_id=analysis_id, understanding=assignment_understanding
     )
 
-    return err
+    return err, assignment_understanding
 
 
 async def prepare_cache(

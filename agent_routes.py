@@ -106,11 +106,19 @@ async def generate_step(request: Request):
         if len(clarification_questions) > 0:
             # this means that the user has answered the clarification questions
             # so we can generate the assignment understanding (which is just a statement of the user's clarifications)
-            await generate_assignment_understanding(
-                analysis_id=analysis_id,
-                clarification_questions=clarification_questions,
-                dfg_api_key=api_key,
+
+            # check if the assignment_understanding exists in the db for this analysis_id
+            err, assignment_understanding = get_assignment_understanding(
+                analysis_id=analysis_id
             )
+
+            # if it doesn't exist, then `err` will be a truthy value
+            if err:
+                _, assignment_understanding = await generate_assignment_understanding(
+                    analysis_id=analysis_id,
+                    clarification_questions=clarification_questions,
+                    dfg_api_key=api_key,
+                )
 
         if sql_only:
             # if sql_only is true, just call the sql generation function and return, while saving the step
@@ -166,13 +174,6 @@ async def generate_step(request: Request):
 
         else:
             # check if the assignment_understanding exists in teh db for this analysis_id
-            err, assignment_understanding = get_assignment_understanding(
-                analysis_id=analysis_id
-            )
-
-            if err:
-                assignment_understanding = ""
-
             question = question.strip()
             if len(prev_questions) > 0:
                 # make a request to combine the previous questions and the current question
